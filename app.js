@@ -1,789 +1,495 @@
-/* clipper - github pages single-page app
-   mobile-first long audio clipping + wav export + heuristic "funny" suggestion
-*/
-
-const el = (id) => document.getElementById(id);
-
-const dropZone = el("dropZone");
-const fileInput = el("fileInput");
-const fileMeta = el("fileMeta");
-const fileName = el("fileName");
-const fileDur = el("fileDur");
-const decodeStatus = el("decodeStatus");
-
-const playerCard = el("playerCard");
-const clipsCard = el("clipsCard");
-const clipsList = el("clipsList");
-
-const audio = el("audio");
-const wave = el("wave");
-const ctx = wave.getContext("2d");
-
-const overlay = el("overlay");
-const handleL = el("handleL");
-const handleR = el("handleR");
-const playhead = el("playhead");
-const shadeL = el("shadeL");
-const shadeR = el("shadeR");
-
-const timeNow = el("timeNow");
-const timeEnd = el("timeEnd");
-const timeSel = el("timeSel");
-
-const playBtn = el("playBtn");
-const loopBtn = el("loopBtn");
-const back5 = el("back5");
-const fwd5 = el("fwd5");
-const setIn = el("setIn");
-const setOut = el("setOut");
-const fitSel = el("fitSel");
-const resetSel = el("resetSel");
-const zoom = el("zoom");
-const speed = el("speed");
-const saveClip = el("saveClip");
-const suggestBtn = el("suggestBtn");
-const clearClips = el("clearClips");
-
-const help = el("help");
-el("helpBtn").addEventListener("click", () => help.showModal());
-el("closeHelp").addEventListener("click", () => help.close());
-
-let audioCtx = null;
-let decodedBuffer = null;      // AudioBuffer for export + analysis (optional but needed for wav export)
-let peaksBase = null;          // base peaks array for waveform (downsampled)
-let duration = 0;
-
-let selection = { start: 0, end: 10 }; // seconds
-let isLoop = false;
-
-let view = {
-  // viewport (in seconds) used for zoomed waveform browsing
-  start: 0,
-  span: 60, // seconds visible
-  dragging: null, // "L" | "R" | "SCRUB"
-  scrubStartX: 0,
-  scrubStartView: 0
+const state = {
+  file: null,
+  audioUrl: null,
+  audioBuffer: null,
+  envelope: [],
+  suggestions: [],
+  analysisRunning: false
 };
 
-const clips = []; // { id, name, start, end, createdAt }
+const fileInput = document.getElementById('fileInput');
+const dropzone = document.getElementById('dropzone');
+const player = document.getElementById('player');
+const workspace = document.getElementById('workspace');
+const aiPanel = document.getElementById('aiPanel');
+const episodeMeta = document.getElementById('episodeMeta');
+const waveform = document.getElementById('waveform');
+const startRange = document.getElementById('startRange');
+const endRange = document.getElementById('endRange');
+const selectionInfo = document.getElementById('selectionInfo');
+const suggestionsEl = document.getElementById('suggestions');
+const statusMsg = document.getElementById('statusMsg');
 
-function fmtTime(s){
-  s = Math.max(0, s);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = Math.floor(s % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
-  return `${m}:${String(sec).padStart(2,'0')}`;
+function setStatus(message, kind = 'ok') {
+  if (!statusMsg) return;
+  statusMsg.textContent = message || '';
+  statusMsg.className = `status ${kind}`.trim();
 }
 
-function clamp(v, a, b){ return Math.min(b, Math.max(a, v)); }
+const fmt = (sec) => {
+  sec = Math.max(0, sec || 0);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  const left = [m, s].map(v => String(v).padStart(2, '0')).join(':');
+  return h > 0 ? `${h}:${left}` : left;
+};
 
-function setStatus(txt, kind="subtle"){
-  decodeStatus.textContent = txt;
-  decodeStatus.style.color =
-    kind === "ok" ? "var(--ok)" :
-    kind === "bad" ? "var(--danger)" : "var(--muted)";
+function setRanges(duration) {
+  startRange.max = String(duration);
+  endRange.max = String(duration);
+  startRange.value = '0';
+  endRange.value = String(Math.min(duration, 30));
+  updateSelectionLabel();
 }
 
-function resizeCanvas(){
-  const dpr = window.devicePixelRatio || 1;
-  const rect = wave.getBoundingClientRect();
-  wave.width = Math.floor(rect.width * dpr);
-  wave.height = Math.floor(120 * dpr);
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  draw();
-  syncOverlay();
+function updateSelectionLabel() {
+  const a = Number(startRange.value);
+  const b = Number(endRange.value);
+  const start = Math.min(a, b);
+  const end = Math.max(a, b);
+  const length = Math.max(0, end - start);
+  selectionInfo.textContent = `Clip: ${fmt(start)} → ${fmt(end)} (${length.toFixed(1)}s)`;
+  drawWaveform();
 }
 
-window.addEventListener("resize", resizeCanvas);
+function drawWaveform(highlight = null) {
+  const ctx = waveform.getContext('2d');
+  const w = waveform.width;
+  const h = waveform.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#0b1018';
+  ctx.fillRect(0, 0, w, h);
 
-function bindDnD(){
-  const prevent = (e) => { e.preventDefault(); e.stopPropagation(); };
-  ["dragenter","dragover","dragleave","drop"].forEach(evt => {
-    dropZone.addEventListener(evt, prevent, false);
-  });
-
-  dropZone.addEventListener("dragover", () => dropZone.classList.add("dragging"));
-  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragging"));
-  dropZone.addEventListener("drop", (e) => {
-    dropZone.classList.remove("dragging");
-    const f = e.dataTransfer.files?.[0];
-    if (f) loadFile(f);
-  });
-}
-bindDnD();
-
-fileInput.addEventListener("change", (e) => {
-  const f = e.target.files?.[0];
-  if (f) loadFile(f);
-  fileInput.value = "";
-});
-
-async function loadFile(file){
-  decodedBuffer = null;
-  peaksBase = null;
-
-  fileMeta.hidden = false;
-  fileName.textContent = file.name;
-
-  setStatus("loading…");
-  playerCard.hidden = true;
-
-  const url = URL.createObjectURL(file);
-  audio.src = url;
-  audio.playbackRate = parseFloat(speed.value);
-
-  await audioLoadedMetadata();
-  duration = audio.duration || 0;
-
-  fileDur.textContent = `duration ${fmtTime(duration)}`;
-  timeEnd.textContent = fmtTime(duration);
-
-  // initial selection + view
-  selection.start = 0;
-  selection.end = Math.min(20, Math.max(10, duration * 0.01));
-  view.start = 0;
-  view.span = pickSpan();
-
-  playerCard.hidden = false;
-  clipsCard.hidden = false;
-
-  setStatus("decoding waveform…");
-  await decodeAndBuildPeaks(file);
-  setStatus("ready", "ok");
-
-  resizeCanvas();
-  updateTimes();
-}
-
-function audioLoadedMetadata(){
-  return new Promise((res) => {
-    const done = () => { audio.removeEventListener("loadedmetadata", done); res(); };
-    audio.addEventListener("loadedmetadata", done);
-  });
-}
-
-function pickSpan(){
-  // mobile friendly spans depending on zoom and duration
-  // zoom 1..8 => 120s..10s roughly
-  const z = parseInt(zoom.value, 10);
-  const spans = [120, 90, 60, 45, 30, 20, 15, 10];
-  const base = spans[z-1] || 60;
-  return clamp(base, 8, Math.max(10, duration));
-}
-
-zoom.addEventListener("input", () => {
-  if (!duration) return;
-  const oldCenter = view.start + view.span * 0.5;
-  view.span = pickSpan();
-  view.start = clamp(oldCenter - view.span * 0.5, 0, Math.max(0, duration - view.span));
-  draw();
-  syncOverlay();
-});
-
-speed.addEventListener("input", () => {
-  audio.playbackRate = parseFloat(speed.value);
-});
-
-playBtn.addEventListener("click", togglePlay);
-loopBtn.addEventListener("click", () => {
-  isLoop = !isLoop;
-  loopBtn.textContent = `loop: ${isLoop ? "on" : "off"}`;
-  loopBtn.setAttribute("aria-pressed", String(isLoop));
-});
-
-back5.addEventListener("click", () => seekTo(audio.currentTime - 5));
-fwd5.addEventListener("click", () => seekTo(audio.currentTime + 5));
-
-setIn.addEventListener("click", () => {
-  selection.start = clamp(audio.currentTime, 0, selection.end - 0.05);
-  draw(); syncOverlay(); updateTimes();
-});
-setOut.addEventListener("click", () => {
-  selection.end = clamp(audio.currentTime, selection.start + 0.05, duration);
-  draw(); syncOverlay(); updateTimes();
-});
-
-fitSel.addEventListener("click", () => {
-  const pad = Math.min(5, (selection.end - selection.start) * 0.2);
-  view.start = clamp(selection.start - pad, 0, Math.max(0, duration - view.span));
-  // if selection doesn't fit, adjust span temporarily
-  const selSpan = (selection.end - selection.start) + pad*2;
-  if (selSpan > view.span) view.span = clamp(selSpan, 8, duration);
-  draw(); syncOverlay();
-});
-
-resetSel.addEventListener("click", () => {
-  selection.start = clamp(audio.currentTime, 0, duration);
-  selection.end = clamp(selection.start + 20, selection.start + 0.05, duration);
-  view.span = pickSpan();
-  view.start = clamp(selection.start - view.span*0.3, 0, Math.max(0, duration - view.span));
-  draw(); syncOverlay(); updateTimes();
-});
-
-saveClip.addEventListener("click", () => {
-  if (!decodedBuffer) return;
-  const name = `clip ${clips.length + 1}`;
-  const id = crypto.randomUUID();
-  clips.unshift({ id, name, start: selection.start, end: selection.end, createdAt: Date.now() });
-  renderClips();
-});
-
-clearClips.addEventListener("click", () => {
-  clips.length = 0;
-  renderClips();
-});
-
-audio.addEventListener("timeupdate", () => {
-  updateTimes();
-  syncPlayhead();
-  if (audio.paused) return;
-
-  if (audio.currentTime >= selection.end - 0.01){
-    if (isLoop){
-      audio.currentTime = selection.start;
-      audio.play();
-    } else {
-      audio.pause();
-      playBtn.textContent = "play";
+  if (state.envelope.length) {
+    const barW = w / state.envelope.length;
+    for (let i = 0; i < state.envelope.length; i++) {
+      const v = state.envelope[i];
+      const bh = Math.max(2, v * (h - 20));
+      const x = i * barW;
+      const y = (h - bh) / 2;
+      ctx.fillStyle = '#3f5e9a';
+      ctx.fillRect(x, y, Math.max(1, barW - 1), bh);
     }
-  }
-});
-
-audio.addEventListener("play", () => playBtn.textContent = "pause");
-audio.addEventListener("pause", () => playBtn.textContent = "play");
-
-function seekTo(t){
-  if (!duration) return;
-  audio.currentTime = clamp(t, 0, duration);
-  updateTimes();
-  syncPlayhead();
-  // keep playhead in view by nudging viewport
-  ensureInView(audio.currentTime);
-}
-
-function togglePlay(){
-  if (!duration) return;
-  if (audio.paused){
-    // if playhead outside selection, snap into selection
-    if (audio.currentTime < selection.start || audio.currentTime > selection.end){
-      audio.currentTime = selection.start;
-    }
-    audio.play();
   } else {
-    audio.pause();
+    // Instant mode placeholder timeline (no expensive full decode yet)
+    ctx.strokeStyle = '#243149';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 10; i++) {
+      const x = (w / 10) * i;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, h);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#8aa0c933';
+    ctx.fillRect(0, h * 0.45, w, h * 0.1);
   }
-}
 
-function updateTimes(){
-  timeNow.textContent = fmtTime(audio.currentTime || 0);
-  timeSel.textContent = `sel ${fmtTime(selection.start)} → ${fmtTime(selection.end)} (${fmtTime(selection.end - selection.start)})`;
-}
+  const dur = player.duration || 1;
+  const s = Math.min(Number(startRange.value || 0), Number(endRange.value || 0)) / dur;
+  const e = Math.max(Number(startRange.value || 0), Number(endRange.value || 0)) / dur;
+  ctx.fillStyle = 'rgba(109,141,255,.25)';
+  ctx.fillRect(s * w, 0, Math.max(2, (e - s) * w), h);
 
-function tToX(t){
-  const rect = wave.getBoundingClientRect();
-  const w = rect.width;
-  const p = (t - view.start) / view.span;
-  return clamp(p * w, 0, w);
-}
-
-function xToT(x){
-  const rect = wave.getBoundingClientRect();
-  const w = rect.width;
-  const p = clamp(x / w, 0, 1);
-  return view.start + p * view.span;
-}
-
-function ensureInView(t){
-  if (t < view.start){
-    view.start = clamp(t - view.span*0.1, 0, Math.max(0, duration - view.span));
-    draw(); syncOverlay();
-  } else if (t > view.start + view.span){
-    view.start = clamp(t - view.span*0.9, 0, Math.max(0, duration - view.span));
-    draw(); syncOverlay();
-  }
-}
-
-function syncOverlay(){
-  const lX = tToX(selection.start);
-  const rX = tToX(selection.end);
-
-  handleL.style.left = `${lX}px`;
-  handleR.style.left = `${rX}px`;
-
-  shadeL.style.left = `0px`;
-  shadeL.style.width = `${lX}px`;
-
-  shadeR.style.left = `${rX}px`;
-  shadeR.style.width = `calc(100% - ${rX}px)`;
-
-  syncPlayhead();
-}
-
-function syncPlayhead(){
-  const x = tToX(audio.currentTime || 0);
-  playhead.style.left = `${x}px`;
-}
-
-function draw(){
-  const rect = wave.getBoundingClientRect();
-  const w = rect.width;
-  const h = 120;
-
-  // bg
-  ctx.clearRect(0,0,w,h);
-
-  // grid line
-  ctx.globalAlpha = 0.25;
+  const nowX = ((player.currentTime || 0) / dur) * w;
+  ctx.strokeStyle = '#00c2a8';
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(0, h/2);
-  ctx.lineTo(w, h/2);
-  ctx.strokeStyle = "#ffffff";
+  ctx.moveTo(nowX, 0);
+  ctx.lineTo(nowX, h);
   ctx.stroke();
-  ctx.globalAlpha = 1;
 
-  if (!peaksBase || !duration){
-    // placeholder
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "14px ui-sans-serif, system-ui";
-    ctx.fillText("waveform will appear here", 12, 22);
-    ctx.globalAlpha = 1;
-    return;
-  }
-
-  // draw waveform from base peaks (normalized 0..1)
-  // map viewport -> indices
-  const n = peaksBase.length;
-  const startIdx = Math.floor((view.start / duration) * n);
-  const endIdx = Math.ceil(((view.start + view.span) / duration) * n);
-  const s = clamp(startIdx, 0, n-1);
-  const e = clamp(endIdx, s+1, n);
-
-  const spanN = e - s;
-  const step = spanN / w;
-
-  // waveform
-  for (let x=0; x<w; x++){
-    const i0 = Math.floor(s + x*step);
-    const i1 = Math.floor(s + (x+1)*step);
-    let p = 0;
-    for (let i=i0; i<=i1 && i<n; i++){
-      if (peaksBase[i] > p) p = peaksBase[i];
-    }
-    const amp = p * (h*0.46);
-
-    // selection tint: if x between handles, brighter
-    const tAtX = xToT(x);
-    const inSel = (tAtX >= selection.start && tAtX <= selection.end);
-    ctx.globalAlpha = inSel ? 0.95 : 0.35;
-    ctx.strokeStyle = inSel ? "#f2f4f8" : "#b9bfd0";
-
-    ctx.beginPath();
-    ctx.moveTo(x+0.5, (h/2) - amp);
-    ctx.lineTo(x+0.5, (h/2) + amp);
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-
-  // time ticks
-  drawTicks(w,h);
-}
-
-function drawTicks(w,h){
-  const secondsPerTick = pickTick();
-  const first = Math.ceil(view.start / secondsPerTick) * secondsPerTick;
-  ctx.globalAlpha = 0.22;
-  ctx.strokeStyle = "#ffffff";
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "11px ui-sans-serif, system-ui";
-  for (let t=first; t<=view.start+view.span; t+=secondsPerTick){
-    const x = tToX(t);
-    ctx.beginPath();
-    ctx.moveTo(x, h-18);
-    ctx.lineTo(x, h);
-    ctx.stroke();
-    ctx.globalAlpha = 0.30;
-    ctx.fillText(fmtTime(t), x+3, h-6);
-    ctx.globalAlpha = 0.22;
-  }
-  ctx.globalAlpha = 1;
-}
-
-function pickTick(){
-  const span = view.span;
-  if (span <= 12) return 1;
-  if (span <= 25) return 2;
-  if (span <= 45) return 5;
-  if (span <= 90) return 10;
-  return 30;
-}
-
-/* pointer interactions (touch-friendly) */
-overlay.addEventListener("pointerdown", (e) => {
-  if (!duration) return;
-  overlay.setPointerCapture(e.pointerId);
-
-  const x = e.clientX - overlay.getBoundingClientRect().left;
-  const lX = tToX(selection.start);
-  const rX = tToX(selection.end);
-
-  const near = (a,b) => Math.abs(a-b) < 18;
-
-  if (near(x,lX)) view.dragging = "L";
-  else if (near(x,rX)) view.dragging = "R";
-  else {
-    // start scrub
-    view.dragging = "SCRUB";
-    view.scrubStartX = e.clientX;
-    view.scrubStartView = view.start;
-
-    // tap to jump playhead if not a swipe
-    // we still do immediate seek for snappy feeling:
-    const t = xToT(x);
-    seekTo(t);
-  }
-});
-
-overlay.addEventListener("pointermove", (e) => {
-  if (!view.dragging) return;
-
-  if (view.dragging === "L" || view.dragging === "R"){
-    const x = e.clientX - overlay.getBoundingClientRect().left;
-    const t = xToT(x);
-    if (view.dragging === "L"){
-      selection.start = clamp(t, 0, selection.end - 0.05);
-      // keep cursor audible: snap playhead with handle when paused
-      if (audio.paused) audio.currentTime = selection.start;
-    } else {
-      selection.end = clamp(t, selection.start + 0.05, duration);
-      if (audio.paused) audio.currentTime = selection.end;
-    }
-    draw(); syncOverlay(); updateTimes();
-    return;
-  }
-
-  if (view.dragging === "SCRUB"){
-    const dx = e.clientX - view.scrubStartX;
-    const rect = overlay.getBoundingClientRect();
-    const frac = dx / rect.width;
-    const shift = -frac * view.span; // swipe right moves earlier
-    view.start = clamp(view.scrubStartView + shift, 0, Math.max(0, duration - view.span));
-    draw(); syncOverlay();
-  }
-});
-
-overlay.addEventListener("pointerup", () => {
-  view.dragging = null;
-});
-
-/* decoding + peaks */
-async function decodeAndBuildPeaks(file){
-  // decode for export + analysis
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-  const buf = await file.arrayBuffer();
-
-  // decode can be slow for 2h, so update status
-  setStatus("decoding audio…");
-  decodedBuffer = await audioCtx.decodeAudioData(buf.slice(0));
-
-  setStatus("building waveform…");
-  peaksBase = buildPeaks(decodedBuffer, 12000); // ~12k bins is a good mobile compromise
-}
-
-function buildPeaks(buffer, bins){
-  const ch = buffer.getChannelData(0);
-  const n = ch.length;
-  const step = Math.floor(n / bins);
-  const peaks = new Float32Array(bins);
-  for (let i=0; i<bins; i++){
-    const start = i*step;
-    const end = (i === bins-1) ? n : (i+1)*step;
-    let p = 0;
-    for (let j=start; j<end; j++){
-      const v = Math.abs(ch[j]);
-      if (v > p) p = v;
-    }
-    peaks[i] = p;
-  }
-  // normalize
-  let max = 0;
-  for (let i=0; i<bins; i++) if (peaks[i] > max) max = peaks[i];
-  if (max > 0){
-    for (let i=0; i<bins; i++) peaks[i] = peaks[i] / max;
-  }
-  return peaks;
-}
-
-/* clip list + export */
-function renderClips(){
-  clipsList.innerHTML = "";
-  if (clips.length === 0){
-    const empty = document.createElement("div");
-    empty.className = "pill subtle";
-    empty.textContent = "no clips yet. save one.";
-    clipsList.appendChild(empty);
-    return;
-  }
-
-  for (const c of clips){
-    const card = document.createElement("div");
-    card.className = "clip";
-
-    const top = document.createElement("div");
-    top.className = "clip-top";
-
-    const left = document.createElement("div");
-    left.innerHTML = `<div class="clip-name">${escapeHtml(c.name)}</div>
-                      <div class="clip-time">${fmtTime(c.start)} → ${fmtTime(c.end)} (${fmtTime(c.end - c.start)})</div>`;
-
-    const right = document.createElement("div");
-    right.innerHTML = `<small>${new Date(c.createdAt).toLocaleString()}</small>`;
-
-    top.appendChild(left);
-    top.appendChild(right);
-
-    const actions = document.createElement("div");
-    actions.className = "clip-actions";
-
-    const jump = mkBtn("jump", "ghost", () => {
-      selection.start = c.start;
-      selection.end = c.end;
-      seekTo(c.start);
-      fitSel.click();
-      draw(); syncOverlay(); updateTimes();
-    });
-
-    const rename = mkBtn("rename", "ghost", () => {
-      const n = prompt("clip name:", c.name);
-      if (n && n.trim()){
-        c.name = n.trim();
-        renderClips();
-      }
-    });
-
-    const exportBtn = mkBtn("export wav", "btn", async () => {
-      exportBtn.disabled = true;
-      exportBtn.textContent = "exporting…";
-      try{
-        const blob = await exportWav(decodedBuffer, c.start, c.end);
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = `${safeFileStem(fileName.textContent)} - ${safeFileStem(c.name)}.wav`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      } finally {
-        exportBtn.disabled = false;
-        exportBtn.textContent = "export wav";
-      }
-    });
-
-    const del = mkBtn("delete", "ghost", () => {
-      const idx = clips.findIndex(x => x.id === c.id);
-      if (idx >= 0) clips.splice(idx, 1);
-      renderClips();
-    });
-    del.style.borderColor = "rgba(255,77,109,.35)";
-    del.style.color = "rgba(255,77,109,.95)";
-
-    actions.append(jump, rename, exportBtn, del);
-
-    card.append(top, actions);
-    clipsList.appendChild(card);
+  if (highlight) {
+    ctx.fillStyle = 'rgba(255,208,0,.25)';
+    ctx.fillRect((highlight.start / dur) * w, 0, Math.max(2, ((highlight.end - highlight.start) / dur) * w), h);
   }
 }
 
-function mkBtn(text, cls, onClick){
-  const b = document.createElement("button");
-  b.textContent = text;
-  b.className = cls;
-  b.addEventListener("click", onClick);
-  return b;
-}
-
-function safeFileStem(s){
-  return (s || "audio").replace(/\.[^/.]+$/,"").replace(/[^\w\s-]+/g,"").trim().slice(0,60) || "clip";
-}
-
-function escapeHtml(str){
-  return (str || "").replace(/[&<>"']/g, (m) => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
-  }[m]));
-}
-
-/* wav export (pcm 16-bit) */
-async function exportWav(buffer, startSec, endSec){
-  const sr = buffer.sampleRate;
-  const start = Math.floor(startSec * sr);
-  const end = Math.floor(endSec * sr);
-  const frames = Math.max(0, end - start);
-  const channels = buffer.numberOfChannels;
-
-  // interleave float samples
-  const interleaved = new Float32Array(frames * channels);
-  for (let ch=0; ch<channels; ch++){
-    const data = buffer.getChannelData(ch).subarray(start, end);
-    for (let i=0; i<frames; i++){
-      interleaved[i*channels + ch] = data[i] || 0;
-    }
-  }
-  return encodeWav(interleaved, { sampleRate: sr, channels });
-}
-
-function encodeWav(interleaved, { sampleRate, channels }){
-  const bytesPerSample = 2;
-  const blockAlign = channels * bytesPerSample;
-  const byteRate = sampleRate * blockAlign;
-  const dataSize = interleaved.length * bytesPerSample;
-
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-
-  // riff header
-  writeStr(view, 0, "RIFF");
-  view.setUint32(4, 36 + dataSize, true);
-  writeStr(view, 8, "WAVE");
-
-  // fmt chunk
-  writeStr(view, 12, "fmt ");
-  view.setUint32(16, 16, true);          // pcm chunk size
-  view.setUint16(20, 1, true);           // audio format 1=pcm
-  view.setUint16(22, channels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, 16, true);          // bits
-
-  // data chunk
-  writeStr(view, 36, "data");
-  view.setUint32(40, dataSize, true);
-
-  // pcm samples
-  let offset = 44;
-  for (let i=0; i<interleaved.length; i++){
-    let s = clamp(interleaved[i], -1, 1);
-    const v = s < 0 ? s * 0x8000 : s * 0x7fff;
-    view.setInt16(offset, v, true);
-    offset += 2;
-  }
-
-  return new Blob([buffer], { type: "audio/wav" });
-}
-
-function writeStr(view, offset, str){
-  for (let i=0; i<str.length; i++) view.setUint8(offset+i, str.charCodeAt(i));
-}
-
-/* "suggest a funny clip" heuristic
-   - computes RMS energy envelope in 0.25s frames
-   - scores windows by (high energy) + (high variance / burstiness)
-   - picks a 25s window centered near best peak
-*/
-suggestBtn.addEventListener("click", async () => {
-  if (!decodedBuffer) return;
-  suggestBtn.disabled = true;
-  const old = suggestBtn.textContent;
-  suggestBtn.textContent = "scanning…";
-
-  try{
-    setStatus("analyzing for laughs…");
-    const suggestion = findFunnyWindow(decodedBuffer);
-    if (!suggestion){
-      setStatus("couldn't find a strong moment, try zooming and clipping manually", "bad");
-      return;
-    }
-    selection.start = suggestion.start;
-    selection.end = suggestion.end;
-    seekTo(selection.start);
-    fitSel.click();
-    draw(); syncOverlay(); updateTimes();
-    setStatus(`suggested: ${fmtTime(selection.start)} → ${fmtTime(selection.end)} (${suggestion.note})`, "ok");
+async function decodeAudio(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) throw new Error('Web Audio decode unsupported on this browser.');
+  const audioCtx = new Ctx();
+  try {
+    return await audioCtx.decodeAudioData(arrayBuffer.slice(0));
   } finally {
-    suggestBtn.disabled = false;
-    suggestBtn.textContent = old;
+    await audioCtx.close();
   }
+}
+
+function computeEnvelope(audioBuffer, bins = 700) {
+  const data = audioBuffer.getChannelData(0);
+  const step = Math.max(1, Math.floor(data.length / bins));
+  const env = [];
+  for (let i = 0; i < data.length; i += step) {
+    let sum = 0;
+    const end = Math.min(data.length, i + step);
+    for (let j = i; j < end; j++) sum += Math.abs(data[j]);
+    env.push(sum / (end - i || 1));
+  }
+  const max = Math.max(...env, 0.0001);
+  return env.map(v => v / max);
+}
+
+function analyzeSuggestionsFromBuffer() {
+  if (!state.audioBuffer) return [];
+  const sr = state.audioBuffer.sampleRate;
+  const data = state.audioBuffer.getChannelData(0);
+  const duration = state.audioBuffer.duration;
+  const windowSec = 18;
+  const hopSec = 4;
+  const suggestions = [];
+
+  for (let start = 0; start + windowSec < duration; start += hopSec) {
+    const i0 = Math.floor(start * sr);
+    const i1 = Math.floor((start + windowSec) * sr);
+    const chunk = data.slice(i0, i1);
+    const frame = Math.max(1, Math.floor(sr * 0.2));
+
+    let rms = 0;
+    for (let i = 0; i < chunk.length; i++) rms += chunk[i] * chunk[i];
+    rms = Math.sqrt(rms / Math.max(1, chunk.length));
+
+    const energies = [];
+    for (let i = 0; i < chunk.length; i += frame) {
+      const end = Math.min(chunk.length, i + frame);
+      let s = 0;
+      for (let j = i; j < end; j++) s += chunk[j] * chunk[j];
+      energies.push(Math.sqrt(s / Math.max(1, end - i)));
+    }
+    energies.sort((a, b) => a - b);
+    const p80 = energies[Math.floor(energies.length * 0.8)] || 0;
+    const p20 = energies[Math.floor(energies.length * 0.2)] || 0;
+    const burst = energies.filter(v => v > p80).length / Math.max(1, energies.length);
+    const density = 1 - (energies.filter(v => v < Math.max(0.015, p20)).length / Math.max(1, energies.length));
+
+    const midBonus = 1 - Math.abs((start / duration) - 0.5);
+    const score = 0.45 * rms + 0.30 * burst + 0.15 * density + 0.10 * midBonus;
+
+    let type = 'one-liner';
+    if (burst > 0.65 && rms > 0.1) type = 'big-laugh';
+    else if (burst > 0.5) type = 'riff';
+
+    suggestions.push({
+      start,
+      end: start + windowSec,
+      score,
+      type,
+      reasons: [`energy ${rms.toFixed(2)}`, `burst ${burst.toFixed(2)}`, `density ${density.toFixed(2)}`]
+    });
+  }
+
+  suggestions.sort((a, b) => b.score - a.score);
+  const selected = [];
+  for (const cand of suggestions) {
+    const overlap = selected.some(s => Math.max(0, Math.min(s.end, cand.end) - Math.max(s.start, cand.start)) > 3);
+    if (!overlap) selected.push(cand);
+    if (selected.length >= 25) break;
+  }
+  return selected;
+}
+
+function quickSuggestions(duration, count = 8) {
+  const picks = [];
+  const baseZones = [0.08, 0.18, 0.32, 0.48, 0.62, 0.74, 0.86];
+  const clipLen = Math.min(24, Math.max(12, duration * 0.04));
+  for (let i = 0; i < count; i++) {
+    const z = baseZones[i % baseZones.length];
+    const jitter = (Math.random() - 0.5) * 0.08;
+    let start = Math.max(0, (z + jitter) * duration);
+    start = Math.min(start, Math.max(0, duration - clipLen));
+    const end = Math.min(duration, start + clipLen);
+    const type = i % 3 === 0 ? 'riff' : (i % 5 === 0 ? 'big-laugh' : 'one-liner');
+    picks.push({
+      start,
+      end,
+      score: 0.55 - i * 0.02,
+      type,
+      reasons: ['instant pick', 'no full decode required']
+    });
+  }
+  return picks;
+}
+
+function renderSuggestions(items) {
+  suggestionsEl.innerHTML = '';
+  items.forEach((s, idx) => {
+    const card = document.createElement('div');
+    card.className = 'suggestion';
+    card.innerHTML = `
+      <div><span class="type">${s.type}</span> • ${fmt(s.start)} → ${fmt(s.end)} • score ${s.score.toFixed(2)}</div>
+      <small>${s.reasons.join(' · ')}</small>
+      <div class="controls-row">
+        <button data-jump="${s.start}">Jump</button>
+        <button data-apply="${idx}">Use as clip</button>
+      </div>
+    `;
+    suggestionsEl.appendChild(card);
+  });
+
+  suggestionsEl.querySelectorAll('[data-jump]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      player.currentTime = Number(btn.dataset.jump);
+      player.play();
+      drawWaveform();
+    });
+  });
+
+  suggestionsEl.querySelectorAll('[data-apply]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const s = items[Number(btn.dataset.apply)];
+      startRange.value = String(s.start.toFixed(1));
+      endRange.value = String(s.end.toFixed(1));
+      updateSelectionLabel();
+      drawWaveform(s);
+    });
+  });
+}
+
+function waitForMetadata(el, timeoutMs = 12000) {
+  return new Promise((resolve, reject) => {
+    if (Number.isFinite(el.duration) && el.duration > 0) return resolve(el.duration);
+    const done = () => { cleanup(); resolve(el.duration); };
+    const fail = () => { cleanup(); reject(new Error('Could not read audio metadata.')); };
+    const timer = setTimeout(() => { cleanup(); reject(new Error('Timed out loading audio metadata.')); }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timer);
+      el.removeEventListener('loadedmetadata', done);
+      el.removeEventListener('error', fail);
+    };
+    el.addEventListener('loadedmetadata', done, { once: true });
+    el.addEventListener('error', fail, { once: true });
+  });
+}
+
+async function maybeRunBackgroundAnalysis() {
+  if (!state.file || state.analysisRunning) return;
+  const fileMb = state.file.size / (1024 * 1024);
+
+  // Avoid mobile memory blowups for large uploads.
+  if (fileMb > 18) {
+    state.suggestions = quickSuggestions(player.duration || 0, 12);
+    renderSuggestions(state.suggestions.slice(0, 5));
+    setStatus('Instant mode ready. Smart deep analysis skipped on large files to keep phone fast.', 'ok');
+    return;
+  }
+
+  state.analysisRunning = true;
+  setStatus('Instant mode ready. Building smart suggestions in background…', 'ok');
+
+  try {
+    state.audioBuffer = await decodeAudio(state.file);
+    state.envelope = computeEnvelope(state.audioBuffer);
+    state.suggestions = analyzeSuggestionsFromBuffer();
+    if (!state.suggestions.length) state.suggestions = quickSuggestions(player.duration || 0, 12);
+    renderSuggestions(state.suggestions.slice(0, 5));
+    drawWaveform();
+    setStatus('Loaded and analyzed. Ready to clip.', 'ok');
+  } catch (err) {
+    console.warn('Background analysis unavailable:', err);
+    state.audioBuffer = null;
+    state.envelope = [];
+    state.suggestions = quickSuggestions(player.duration || 0, 12);
+    renderSuggestions(state.suggestions.slice(0, 5));
+    drawWaveform();
+    setStatus('Instant mode ready. Deep analysis unavailable on this browser/file.', 'ok');
+  } finally {
+    state.analysisRunning = false;
+  }
+}
+
+function exportClipMarkerJson(start, end) {
+  const payload = {
+    source: state.file?.name || 'unknown',
+    start_sec: Number(start.toFixed(2)),
+    end_sec: Number(end.toFixed(2)),
+    duration_sec: Number((end - start).toFixed(2)),
+    created_at: new Date().toISOString()
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  const safeName = (state.file?.name || 'clip').replace(/\.[^/.]+$/, '');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${safeName}_${Math.round(start)}-${Math.round(end)}.clip.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+}
+
+async function exportWavClip() {
+  const start = Math.min(Number(startRange.value), Number(endRange.value));
+  const end = Math.max(Number(startRange.value), Number(endRange.value));
+  if (end - start < 0.5) {
+    setStatus('Clip is too short. Select at least 0.5s.', 'error');
+    return;
+  }
+
+  const stream = player.captureStream ? player.captureStream() : (player.mozCaptureStream ? player.mozCaptureStream() : null);
+  if (!stream || typeof MediaRecorder === 'undefined') {
+    exportClipMarkerJson(start, end);
+    setStatus('Direct audio export not supported here. Saved clip marker JSON instead.', 'ok');
+    return;
+  }
+
+  try {
+    setStatus('Recording clip export in realtime…', 'ok');
+    const chunks = [];
+    const rec = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : undefined });
+    rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+    const stopAt = end;
+    const stopWhen = () => {
+      if (player.currentTime >= stopAt) {
+        player.pause();
+        player.removeEventListener('timeupdate', stopWhen);
+        rec.stop();
+      }
+    };
+
+    await new Promise((resolve, reject) => {
+      rec.onerror = () => reject(new Error('MediaRecorder failed'));
+      rec.onstop = () => resolve();
+
+      player.currentTime = start;
+      player.play().then(() => {
+        player.addEventListener('timeupdate', stopWhen);
+        rec.start(250);
+      }).catch(reject);
+    });
+
+    const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' });
+    const a = document.createElement('a');
+    const safeName = (state.file?.name || 'clip').replace(/\.[^/.]+$/, '');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${safeName}_${Math.round(start)}-${Math.round(end)}.webm`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    setStatus('Clip exported.', 'ok');
+  } catch (err) {
+    console.error(err);
+    exportClipMarkerJson(start, end);
+    setStatus('Export fallback used: saved clip marker JSON.', 'error');
+  }
+}
+
+async function loadFile(file) {
+  if (!file) return;
+  setStatus('Opening file…', 'ok');
+
+  try {
+    state.file = file;
+    state.audioBuffer = null;
+    state.envelope = [];
+    state.suggestions = [];
+
+    if (state.audioUrl) URL.revokeObjectURL(state.audioUrl);
+    state.audioUrl = URL.createObjectURL(file);
+
+    workspace.hidden = false;
+    aiPanel.hidden = false;
+    suggestionsEl.innerHTML = '<div class="suggestion">Ready. Tap Suggest to get instant picks.</div>';
+    episodeMeta.textContent = `${file.name} • ${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+
+    player.src = state.audioUrl;
+    player.load();
+
+    const duration = await waitForMetadata(player);
+    setRanges(duration);
+    drawWaveform();
+
+    episodeMeta.textContent = `${file.name} • ${fmt(duration)} • ${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+    setStatus('Loaded instantly. You can clip now.', 'ok');
+
+    // Non-blocking: do deeper analysis only if cheap enough.
+    setTimeout(() => { maybeRunBackgroundAnalysis(); }, 10);
+  } catch (err) {
+    console.error(err);
+    setStatus(`Could not open this file: ${err?.message || 'unknown error'} Try MP3/M4A/WAV.`, 'error');
+  }
+}
+
+fileInput.addEventListener('change', async (e) => {
+  await loadFile(e.target.files[0]);
 });
 
-function findFunnyWindow(buffer){
-  const sr = buffer.sampleRate;
-  const mono = buffer.getChannelData(0);
-  const frameSec = 0.25;
-  const hop = Math.floor(frameSec * sr);
-  const totalFrames = Math.floor(mono.length / hop);
+dropzone.addEventListener('click', () => {
+  fileInput.value = '';
+  fileInput.click();
+});
+dropzone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropzone.style.borderColor = '#6d8dff';
+});
+dropzone.addEventListener('dragleave', () => { dropzone.style.borderColor = '#3e4d6f'; });
+dropzone.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  dropzone.style.borderColor = '#3e4d6f';
+  await loadFile(e.dataTransfer.files?.[0]);
+});
 
-  if (totalFrames < 40) return null;
+player.addEventListener('timeupdate', drawWaveform);
+startRange.addEventListener('input', updateSelectionLabel);
+endRange.addEventListener('input', updateSelectionLabel);
 
-  // rms envelope
-  const rms = new Float32Array(totalFrames);
-  for (let f=0; f<totalFrames; f++){
-    const start = f*hop;
-    const end = Math.min(mono.length, start + hop);
-    let sum = 0;
-    for (let i=start; i<end; i++){
-      const v = mono[i];
-      sum += v*v;
+document.getElementById('setStartNow').addEventListener('click', () => {
+  startRange.value = String(player.currentTime.toFixed(1));
+  updateSelectionLabel();
+});
+document.getElementById('setEndNow').addEventListener('click', () => {
+  endRange.value = String(player.currentTime.toFixed(1));
+  updateSelectionLabel();
+});
+
+document.getElementById('previewClip').addEventListener('click', () => {
+  const start = Math.min(Number(startRange.value), Number(endRange.value));
+  const end = Math.max(Number(startRange.value), Number(endRange.value));
+  player.currentTime = start;
+  player.play();
+  const stop = () => {
+    if (player.currentTime >= end) {
+      player.pause();
+      player.removeEventListener('timeupdate', stop);
     }
-    rms[f] = Math.sqrt(sum / Math.max(1, end - start));
-  }
-
-  // normalize rms
-  let max = 0;
-  for (let i=0; i<rms.length; i++) if (rms[i] > max) max = rms[i];
-  if (max > 0) for (let i=0; i<rms.length; i++) rms[i] /= max;
-
-  // compute z-ish threshold to find energetic moments
-  const mean = avg(rms);
-  const sd = Math.sqrt(avg(rms.map(v => (v-mean)*(v-mean))));
-  const thresh = clamp(mean + sd * 1.1, 0.18, 0.65);
-
-  // score windows (25s) with burstiness
-  const winSec = 25;
-  const winFrames = Math.floor(winSec / frameSec);
-  let best = { score: -Infinity, frame: 0, note: "" };
-
-  for (let f=0; f<=totalFrames-winFrames; f++){
-    // energy + variance + peak density above threshold
-    let e = 0, e2 = 0, hot = 0, peak = 0;
-    for (let j=0; j<winFrames; j++){
-      const v = rms[f+j];
-      e += v;
-      e2 += v*v;
-      if (v > thresh) hot++;
-      if (v > peak) peak = v;
-    }
-    const m = e / winFrames;
-    const varr = (e2 / winFrames) - m*m;
-    const hotFrac = hot / winFrames;
-
-    // a "laughy" window tends to have: high peak, decent mean, and lots of above-threshold bursts
-    const score = (peak * 1.2) + (m * 0.9) + (Math.sqrt(Math.max(0, varr)) * 1.1) + (hotFrac * 0.8);
-
-    if (score > best.score){
-      best = {
-        score,
-        frame: f,
-        note: `energy ${Math.round(peak*100)} / burst ${Math.round(hotFrac*100)}%`
-      };
-    }
-  }
-
-  const start = best.frame * frameSec;
-  const end = start + winSec;
-
-  // clamp + avoid extremely quiet files
-  if (best.score < 0.7) return null;
-
-  return {
-    start: clamp(start, 0, Math.max(0, duration - 0.5)),
-    end: clamp(end, 0.5, duration),
-    note: best.note
   };
-}
+  player.addEventListener('timeupdate', stop);
+});
 
-function avg(arr){
-  let s = 0;
-  for (let i=0; i<arr.length; i++) s += arr[i];
-  return s / Math.max(1, arr.length);
-}
+document.getElementById('saveClip').addEventListener('click', exportWavClip);
+
+document.querySelectorAll('[data-skip]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    player.currentTime = Math.max(0, Math.min(player.duration || Infinity, player.currentTime + Number(btn.dataset.skip)));
+  });
+});
+
+document.querySelectorAll('[data-speed]').forEach(btn => {
+  btn.addEventListener('click', () => { player.playbackRate = Number(btn.dataset.speed); });
+});
+
+document.getElementById('playPause').addEventListener('click', () => {
+  if (player.paused) player.play();
+  else player.pause();
+});
+
+document.getElementById('suggestOne').addEventListener('click', () => {
+  if (!state.suggestions.length) {
+    state.suggestions = quickSuggestions(player.duration || 0, 8);
+  }
+  renderSuggestions([state.suggestions[0]]);
+});
+
+document.getElementById('suggestFive').addEventListener('click', () => {
+  if (!state.suggestions.length) {
+    state.suggestions = quickSuggestions(player.duration || 0, 12);
+  }
+  const pool = state.suggestions.slice(0, 20);
+  const picks = [];
+  while (picks.length < 5 && pool.length) {
+    const idx = Math.floor(Math.random() * pool.length);
+    const cand = pool.splice(idx, 1)[0];
+    if (!picks.some(p => Math.max(0, Math.min(p.end, cand.end) - Math.max(p.start, cand.start)) > 3)) {
+      picks.push(cand);
+    }
+  }
+  renderSuggestions(picks);
+});
