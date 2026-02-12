@@ -17,6 +17,14 @@ const startRange = document.getElementById('startRange');
 const endRange = document.getElementById('endRange');
 const selectionInfo = document.getElementById('selectionInfo');
 const suggestionsEl = document.getElementById('suggestions');
+const statusMsg = document.getElementById('statusMsg');
+
+
+function setStatus(message, kind = 'ok') {
+  if (!statusMsg) return;
+  statusMsg.textContent = message || '';
+  statusMsg.className = `status ${kind}`.trim();
+}
 
 const fmt = (sec) => {
   sec = Math.max(0, sec || 0);
@@ -87,10 +95,17 @@ function drawWaveform(highlight = null) {
 
 async function decodeAudio(file) {
   const arrayBuffer = await file.arrayBuffer();
-  const audioCtx = new AudioContext();
-  const decoded = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
-  await audioCtx.close();
-  return decoded;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) {
+    throw new Error('This browser does not support Web Audio decoding.');
+  }
+  const audioCtx = new Ctx();
+  try {
+    const decoded = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+    return decoded;
+  } finally {
+    await audioCtx.close();
+  }
 }
 
 function computeEnvelope(audioBuffer, bins = 700) {
@@ -265,31 +280,45 @@ function encodeWav(channels, sampleRate) {
 
 async function loadFile(file) {
   if (!file) return;
-  state.file = file;
-  if (state.audioUrl) URL.revokeObjectURL(state.audioUrl);
-  state.audioUrl = URL.createObjectURL(file);
-  player.src = state.audioUrl;
-  player.load();
+  setStatus('Loading audio…', 'ok');
 
-  state.audioBuffer = await decodeAudio(file);
-  state.envelope = computeEnvelope(state.audioBuffer);
-  state.suggestions = analyzeSuggestions();
+  try {
+    state.file = file;
+    if (state.audioUrl) URL.revokeObjectURL(state.audioUrl);
+    state.audioUrl = URL.createObjectURL(file);
+    player.src = state.audioUrl;
+    player.load();
 
-  workspace.hidden = false;
-  aiPanel.hidden = false;
+    state.audioBuffer = await decodeAudio(file);
+    state.envelope = computeEnvelope(state.audioBuffer);
+    state.suggestions = analyzeSuggestions();
 
-  const duration = state.audioBuffer.duration;
-  setRanges(duration);
-  episodeMeta.textContent = `${file.name} • ${fmt(duration)} • ${(file.size / (1024 * 1024)).toFixed(1)} MB`;
-  renderSuggestions(state.suggestions.slice(0, 5));
-  drawWaveform();
+    workspace.hidden = false;
+    aiPanel.hidden = false;
+
+    const duration = state.audioBuffer.duration;
+    setRanges(duration);
+    episodeMeta.textContent = `${file.name} • ${fmt(duration)} • ${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+    renderSuggestions(state.suggestions.slice(0, 5));
+    drawWaveform();
+    setStatus('Loaded. Ready to clip.', 'ok');
+  } catch (err) {
+    console.error(err);
+    workspace.hidden = true;
+    aiPanel.hidden = true;
+    const reason = err?.message || 'Audio could not be decoded in-browser.';
+    setStatus(`Could not open this file: ${reason} Try MP3/M4A/WAV.`, 'error');
+  }
 }
 
 fileInput.addEventListener('change', async (e) => {
   await loadFile(e.target.files[0]);
 });
 
-dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('click', () => {
+  fileInput.value = '';
+  fileInput.click();
+});
 dropzone.addEventListener('dragover', (e) => {
   e.preventDefault();
   dropzone.style.borderColor = '#6d8dff';
