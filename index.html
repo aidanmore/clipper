@@ -3,30 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>clipper</title>
+    <title>LaughSlice — Comedy Podcast Clipper</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header class="topbar">
-      <h1>clipper</h1>
-      <p>drop a long episode, scan fast, clip fast.</p>
+      <h1>🎙️ LaughSlice</h1>
+      <p>Drop a long episode, scan fast, clip fast.</p>
     </header>
 
     <main class="container">
       <section class="card upload-card">
-        <h2>1) add episode</h2>
+        <h2>1) Add episode</h2>
         <label class="dropzone" id="dropzone">
-          <input id="fileInput" type="file" accept=".mp3,.m4a,.wav,.aac,.ogg,audio/mpeg,audio/mp3,audio/mp4,audio/wav,audio/*" hidden />
+          <input id="fileInput" type="file" accept="audio/*" hidden />
           <div>
-            <strong>tap or drop audio</strong>
-            <p>maybe this will work.</p>
+            <strong>Tap or drop audio</strong>
+            <p>Works great for 1–2 hour comedy podcasts.</p>
           </div>
         </label>
         <div id="episodeMeta" class="meta"></div>
+        <div id="statusMsg" class="status" role="status" aria-live="polite"></div>
       </section>
 
       <section class="card" id="workspace" hidden>
-        <h2>2) scan + clip (mobile-first)</h2>
+        <h2>2) Scan + clip (mobile-first)</h2>
         <audio id="player" controls preload="metadata"></audio>
 
         <div class="controls-row">
@@ -71,13 +72,13 @@
         <h2>3) Smart funny suggestions</h2>
         <p class="hint">Analyzes energy spikes + conversational burstiness to surface likely one-liners/riffs/laugh peaks.</p>
         <div class="controls-row">
-          <button id="suggestOne" class="primary">suggest clip</button>
-          <button id="suggestFive">suggest 5 clips</button>
+          <button id="suggestOne" class="primary">✨ Suggest best clip</button>
+          <button id="suggestFive">🎲 Suggest 5 fun clips</button>
         </div>
         <div id="suggestions" class="suggestions"></div>
       </section>
     </main>
 
-    <script src="./app.js"></script>
+    <script src="app.js"></script>
   </body>
 </html>
