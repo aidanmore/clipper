@@ -21,6 +21,11 @@ const suggestionsEl = document.getElementById('suggestions');
 const statusMsg = document.getElementById('statusMsg');
 let mp3LibPromise = null;
 
+function isIOS() {
+  const ua = navigator.userAgent || '';
+  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 function setStatus(message, kind = 'ok') {
   statusMsg.textContent = message || '';
   statusMsg.className = `status ${kind}`.trim();
@@ -380,6 +385,62 @@ async function exportClip() {
   }
 
   try {
+    // iOS Safari can hard-refresh the page when large decode/encode work runs in-memory.
+    // Prefer realtime recorder path there to avoid full decode memory spikes.
+    const stream = player.captureStream ? player.captureStream() : (player.mozCaptureStream ? player.mozCaptureStream() : null);
+    const canRecord = !!stream && typeof MediaRecorder !== 'undefined';
+    if (canRecord) {
+      setStatus('exporting clip…', 'ok');
+      const chunks = [];
+      const mimeCandidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+      let selectedMime = '';
+      for (const m of mimeCandidates) {
+        if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) {
+          selectedMime = m;
+          break;
+        }
+      }
+
+      const rec = selectedMime ? new MediaRecorder(stream, { mimeType: selectedMime }) : new MediaRecorder(stream);
+      rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+      const stopWhen = () => {
+        if (player.currentTime >= end) {
+          player.pause();
+          player.removeEventListener('timeupdate', stopWhen);
+          rec.stop();
+        }
+      };
+
+      await new Promise((resolve, reject) => {
+        rec.onerror = () => reject(new Error('media recorder failed'));
+        rec.onstop = () => resolve();
+        player.currentTime = start;
+        player.play().then(() => {
+          player.addEventListener('timeupdate', stopWhen);
+          rec.start(250);
+        }).catch(reject);
+      });
+
+      const outType = chunks[0]?.type || selectedMime || 'audio/webm';
+      const ext = outType.includes('mp4') ? 'm4a' : 'webm';
+      const blob = new Blob(chunks, { type: outType });
+      const a = document.createElement('a');
+      const safeName = (state.file?.name || 'clip').replace(/\.[^/.]+$/, '');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${safeName}_${Math.round(start)}-${Math.round(end)}.${ext}`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      setStatus(`clip exported as ${ext}.`, 'ok');
+      return;
+    }
+
+    if (isIOS()) {
+      exportClipMarkerJson(start, end);
+      setStatus('ios export fallback used: saved clip marker json to avoid browser crash.', 'error');
+      return;
+    }
+
     setStatus('exporting mp3…', 'ok');
     const blob = await encodeMp3FromSelection(start, end);
     const a = document.createElement('a');
