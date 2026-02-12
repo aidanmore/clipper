@@ -15,18 +15,18 @@
     <main class="container">
       <section class="card upload-card">
         <h2>1) add episode</h2>
-        <label class="dropzone" id="dropzone">
+        <div class="dropzone" id="dropzone">
           <input
             id="fileInput"
+            class="file-input-overlay"
             type="file"
             accept=".mp3,.wav,.m4a,.aac,.ogg,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/ogg"
-            hidden
           />
           <div>
             <strong>tap or drop audio</strong>
-            <p>works for long comedy episodes.</p>
+            <p>say something funny man.</p>
           </div>
-        </label>
+        </div>
         <div id="episodeMeta" class="meta"></div>
         <div id="statusMsg" class="status" role="status" aria-live="polite"></div>
       </section>
