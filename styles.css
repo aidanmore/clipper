@@ -72,3 +72,7 @@ canvas {
 @media (min-width: 760px) {
   .range-grid { grid-template-columns: 1fr 1fr; }
 }
+
+.status { margin-top: 8px; font-size: .92rem; color: var(--muted); }
+.status.error { color: #ff7d8f; }
+.status.ok { color: #79f2c0; }
