@@ -21,7 +21,6 @@ const suggestionsEl = document.getElementById('suggestions');
 const statusMsg = document.getElementById('statusMsg');
 
 function setStatus(message, kind = 'ok') {
-  if (!statusMsg) return;
   statusMsg.textContent = message || '';
   statusMsg.className = `status ${kind}`.trim();
 }
@@ -35,12 +34,34 @@ const fmt = (sec) => {
   return h > 0 ? `${h}:${left}` : left;
 };
 
+function currentDuration() {
+  const d = player.duration;
+  return Number.isFinite(d) && d > 0 ? d : 3600;
+}
+
 function setRanges(duration) {
-  startRange.max = String(duration);
-  endRange.max = String(duration);
+  const dur = Math.max(1, duration || 1);
+  startRange.max = String(dur);
+  endRange.max = String(dur);
   startRange.value = '0';
-  endRange.value = String(Math.min(duration, 30));
+  endRange.value = String(Math.min(dur, 30));
   updateSelectionLabel();
+}
+
+function syncRangesToMetadata() {
+  const dur = player.duration;
+  if (!Number.isFinite(dur) || dur <= 0) return;
+  startRange.max = String(dur);
+  endRange.max = String(dur);
+
+  const s = Math.min(Number(startRange.value), dur);
+  const e = Math.min(Math.max(Number(endRange.value), s + 0.1), dur);
+  startRange.value = String(s);
+  endRange.value = String(e);
+
+  episodeMeta.textContent = `${state.file?.name || 'audio'} • ${fmt(dur)} • ${((state.file?.size || 0) / (1024 * 1024)).toFixed(1)} mb`;
+  updateSelectionLabel();
+  drawWaveform();
 }
 
 function updateSelectionLabel() {
@@ -49,7 +70,7 @@ function updateSelectionLabel() {
   const start = Math.min(a, b);
   const end = Math.max(a, b);
   const length = Math.max(0, end - start);
-  selectionInfo.textContent = `Clip: ${fmt(start)} → ${fmt(end)} (${length.toFixed(1)}s)`;
+  selectionInfo.textContent = `clip: ${fmt(start)} -> ${fmt(end)} (${length.toFixed(1)}s)`;
   drawWaveform();
 }
 
@@ -58,7 +79,7 @@ function drawWaveform(highlight = null) {
   const w = waveform.width;
   const h = waveform.height;
   ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = '#0b1018';
+  ctx.fillStyle = '#050505';
   ctx.fillRect(0, 0, w, h);
 
   if (state.envelope.length) {
@@ -68,12 +89,11 @@ function drawWaveform(highlight = null) {
       const bh = Math.max(2, v * (h - 20));
       const x = i * barW;
       const y = (h - bh) / 2;
-      ctx.fillStyle = '#3f5e9a';
+      ctx.fillStyle = '#d9d9d9';
       ctx.fillRect(x, y, Math.max(1, barW - 1), bh);
     }
   } else {
-    // Instant mode placeholder timeline (no expensive full decode yet)
-    ctx.strokeStyle = '#243149';
+    ctx.strokeStyle = '#1f1f1f';
     ctx.lineWidth = 1;
     for (let i = 1; i < 10; i++) {
       const x = (w / 10) * i;
@@ -82,18 +102,18 @@ function drawWaveform(highlight = null) {
       ctx.lineTo(x, h);
       ctx.stroke();
     }
-    ctx.fillStyle = '#8aa0c933';
+    ctx.fillStyle = '#ffffff22';
     ctx.fillRect(0, h * 0.45, w, h * 0.1);
   }
 
-  const dur = player.duration || 1;
+  const dur = Math.max(1, currentDuration());
   const s = Math.min(Number(startRange.value || 0), Number(endRange.value || 0)) / dur;
   const e = Math.max(Number(startRange.value || 0), Number(endRange.value || 0)) / dur;
-  ctx.fillStyle = 'rgba(109,141,255,.25)';
+  ctx.fillStyle = 'rgba(255,255,255,.16)';
   ctx.fillRect(s * w, 0, Math.max(2, (e - s) * w), h);
 
   const nowX = ((player.currentTime || 0) / dur) * w;
-  ctx.strokeStyle = '#00c2a8';
+  ctx.strokeStyle = '#fff';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(nowX, 0);
@@ -101,16 +121,16 @@ function drawWaveform(highlight = null) {
   ctx.stroke();
 
   if (highlight) {
-    ctx.fillStyle = 'rgba(255,208,0,.25)';
+    ctx.fillStyle = 'rgba(255,255,255,.25)';
     ctx.fillRect((highlight.start / dur) * w, 0, Math.max(2, ((highlight.end - highlight.start) / dur) * w), h);
   }
 }
 
 async function decodeAudio(file) {
   const arrayBuffer = await file.arrayBuffer();
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  if (!Ctx) throw new Error('Web Audio decode unsupported on this browser.');
-  const audioCtx = new Ctx();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) throw new Error('web audio decode unsupported');
+  const audioCtx = new AudioCtx();
   try {
     return await audioCtx.decodeAudioData(arrayBuffer.slice(0));
   } finally {
@@ -126,7 +146,7 @@ function computeEnvelope(audioBuffer, bins = 700) {
     let sum = 0;
     const end = Math.min(data.length, i + step);
     for (let j = i; j < end; j++) sum += Math.abs(data[j]);
-    env.push(sum / (end - i || 1));
+    env.push(sum / Math.max(1, end - i));
   }
   const max = Math.max(...env, 0.0001);
   return env.map(v => v / max);
@@ -163,7 +183,6 @@ function analyzeSuggestionsFromBuffer() {
     const p20 = energies[Math.floor(energies.length * 0.2)] || 0;
     const burst = energies.filter(v => v > p80).length / Math.max(1, energies.length);
     const density = 1 - (energies.filter(v => v < Math.max(0.015, p20)).length / Math.max(1, energies.length));
-
     const midBonus = 1 - Math.abs((start / duration) - 0.5);
     const score = 0.45 * rms + 0.30 * burst + 0.15 * density + 0.10 * midBonus;
 
@@ -191,23 +210,19 @@ function analyzeSuggestionsFromBuffer() {
 }
 
 function quickSuggestions(duration, count = 8) {
+  const dur = Math.max(30, duration || 3600);
   const picks = [];
   const baseZones = [0.08, 0.18, 0.32, 0.48, 0.62, 0.74, 0.86];
-  const clipLen = Math.min(24, Math.max(12, duration * 0.04));
+  const clipLen = Math.min(24, Math.max(12, dur * 0.04));
+
   for (let i = 0; i < count; i++) {
     const z = baseZones[i % baseZones.length];
     const jitter = (Math.random() - 0.5) * 0.08;
-    let start = Math.max(0, (z + jitter) * duration);
-    start = Math.min(start, Math.max(0, duration - clipLen));
-    const end = Math.min(duration, start + clipLen);
+    let start = Math.max(0, (z + jitter) * dur);
+    start = Math.min(start, Math.max(0, dur - clipLen));
+    const end = Math.min(dur, start + clipLen);
     const type = i % 3 === 0 ? 'riff' : (i % 5 === 0 ? 'big-laugh' : 'one-liner');
-    picks.push({
-      start,
-      end,
-      score: 0.55 - i * 0.02,
-      type,
-      reasons: ['instant pick', 'no full decode required']
-    });
+    picks.push({ start, end, score: 0.55 - i * 0.02, type, reasons: ['instant pick', 'no full decode required'] });
   }
   return picks;
 }
@@ -221,8 +236,8 @@ function renderSuggestions(items) {
       <div><span class="type">${s.type}</span> • ${fmt(s.start)} → ${fmt(s.end)} • score ${s.score.toFixed(2)}</div>
       <small>${s.reasons.join(' · ')}</small>
       <div class="controls-row">
-        <button data-jump="${s.start}">Jump</button>
-        <button data-apply="${idx}">Use as clip</button>
+        <button data-jump="${s.start}">jump</button>
+        <button data-apply="${idx}">use as clip</button>
       </div>
     `;
     suggestionsEl.appendChild(card);
@@ -247,53 +262,34 @@ function renderSuggestions(items) {
   });
 }
 
-function waitForMetadata(el, timeoutMs = 12000) {
-  return new Promise((resolve, reject) => {
-    if (Number.isFinite(el.duration) && el.duration > 0) return resolve(el.duration);
-    const done = () => { cleanup(); resolve(el.duration); };
-    const fail = () => { cleanup(); reject(new Error('Could not read audio metadata.')); };
-    const timer = setTimeout(() => { cleanup(); reject(new Error('Timed out loading audio metadata.')); }, timeoutMs);
-    const cleanup = () => {
-      clearTimeout(timer);
-      el.removeEventListener('loadedmetadata', done);
-      el.removeEventListener('error', fail);
-    };
-    el.addEventListener('loadedmetadata', done, { once: true });
-    el.addEventListener('error', fail, { once: true });
-  });
-}
-
 async function maybeRunBackgroundAnalysis() {
   if (!state.file || state.analysisRunning) return;
   const fileMb = state.file.size / (1024 * 1024);
 
-  // Avoid mobile memory blowups for large uploads.
   if (fileMb > 18) {
-    state.suggestions = quickSuggestions(player.duration || 0, 12);
+    state.suggestions = quickSuggestions(currentDuration(), 12);
     renderSuggestions(state.suggestions.slice(0, 5));
-    setStatus('Instant mode ready. Smart deep analysis skipped on large files to keep phone fast.', 'ok');
+    setStatus('instant mode ready. deep analysis skipped on large files to keep phone fast.', 'ok');
     return;
   }
 
   state.analysisRunning = true;
-  setStatus('Instant mode ready. Building smart suggestions in background…', 'ok');
-
+  setStatus('instant mode ready. building smart suggestions in background…', 'ok');
   try {
     state.audioBuffer = await decodeAudio(state.file);
     state.envelope = computeEnvelope(state.audioBuffer);
     state.suggestions = analyzeSuggestionsFromBuffer();
-    if (!state.suggestions.length) state.suggestions = quickSuggestions(player.duration || 0, 12);
+    if (!state.suggestions.length) state.suggestions = quickSuggestions(currentDuration(), 12);
     renderSuggestions(state.suggestions.slice(0, 5));
     drawWaveform();
-    setStatus('Loaded and analyzed. Ready to clip.', 'ok');
-  } catch (err) {
-    console.warn('Background analysis unavailable:', err);
+    setStatus('loaded and analyzed. ready to clip.', 'ok');
+  } catch {
     state.audioBuffer = null;
     state.envelope = [];
-    state.suggestions = quickSuggestions(player.duration || 0, 12);
+    state.suggestions = quickSuggestions(currentDuration(), 12);
     renderSuggestions(state.suggestions.slice(0, 5));
     drawWaveform();
-    setStatus('Instant mode ready. Deep analysis unavailable on this browser/file.', 'ok');
+    setStatus('instant mode ready. deep analysis unavailable on this browser/file.', 'ok');
   } finally {
     state.analysisRunning = false;
   }
@@ -316,30 +312,29 @@ function exportClipMarkerJson(start, end) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1500);
 }
 
-async function exportWavClip() {
+async function exportClip() {
   const start = Math.min(Number(startRange.value), Number(endRange.value));
   const end = Math.max(Number(startRange.value), Number(endRange.value));
   if (end - start < 0.5) {
-    setStatus('Clip is too short. Select at least 0.5s.', 'error');
+    setStatus('clip is too short. select at least 0.5s.', 'error');
     return;
   }
 
   const stream = player.captureStream ? player.captureStream() : (player.mozCaptureStream ? player.mozCaptureStream() : null);
   if (!stream || typeof MediaRecorder === 'undefined') {
     exportClipMarkerJson(start, end);
-    setStatus('Direct audio export not supported here. Saved clip marker JSON instead.', 'ok');
+    setStatus('direct audio export not supported here. saved clip marker json instead.', 'ok');
     return;
   }
 
   try {
-    setStatus('Recording clip export in realtime…', 'ok');
+    setStatus('recording clip export in realtime…', 'ok');
     const chunks = [];
     const rec = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : undefined });
     rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
 
-    const stopAt = end;
     const stopWhen = () => {
-      if (player.currentTime >= stopAt) {
+      if (player.currentTime >= end) {
         player.pause();
         player.removeEventListener('timeupdate', stopWhen);
         rec.stop();
@@ -347,9 +342,8 @@ async function exportWavClip() {
     };
 
     await new Promise((resolve, reject) => {
-      rec.onerror = () => reject(new Error('MediaRecorder failed'));
+      rec.onerror = () => reject(new Error('media recorder failed'));
       rec.onstop = () => resolve();
-
       player.currentTime = start;
       player.play().then(() => {
         player.addEventListener('timeupdate', stopWhen);
@@ -364,17 +358,16 @@ async function exportWavClip() {
     a.download = `${safeName}_${Math.round(start)}-${Math.round(end)}.webm`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-    setStatus('Clip exported.', 'ok');
-  } catch (err) {
-    console.error(err);
+    setStatus('clip exported.', 'ok');
+  } catch {
     exportClipMarkerJson(start, end);
-    setStatus('Export fallback used: saved clip marker JSON.', 'error');
+    setStatus('export fallback used: saved clip marker json.', 'error');
   }
 }
 
 async function loadFile(file) {
   if (!file) return;
-  setStatus('Opening file…', 'ok');
+  setStatus('opening file…', 'ok');
 
   try {
     state.file = file;
@@ -387,26 +380,30 @@ async function loadFile(file) {
 
     workspace.hidden = false;
     aiPanel.hidden = false;
-    suggestionsEl.innerHTML = '<div class="suggestion">Ready. Tap Suggest to get instant picks.</div>';
-    episodeMeta.textContent = `${file.name} • ${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+    setRanges(3600);
+    drawWaveform();
+
+    suggestionsEl.innerHTML = '<div class="suggestion">ready. tap suggest to get instant picks.</div>';
+    episodeMeta.textContent = `${file.name} • ${((file.size) / (1024 * 1024)).toFixed(1)} mb`;
 
     player.src = state.audioUrl;
     player.load();
 
-    const duration = await waitForMetadata(player);
-    setRanges(duration);
-    drawWaveform();
-
-    episodeMeta.textContent = `${file.name} • ${fmt(duration)} • ${(file.size / (1024 * 1024)).toFixed(1)} MB`;
-    setStatus('Loaded instantly. You can clip now.', 'ok');
-
-    // Non-blocking: do deeper analysis only if cheap enough.
+    setStatus('file selected. if ios delays metadata, tap play once then keep clipping.', 'ok');
     setTimeout(() => { maybeRunBackgroundAnalysis(); }, 10);
   } catch (err) {
-    console.error(err);
-    setStatus(`Could not open this file: ${err?.message || 'unknown error'} Try MP3/M4A/WAV.`, 'error');
+    setStatus(`could not open this file: ${err?.message || 'unknown error'} try mp3/wav/m4a.`, 'error');
   }
 }
+
+player.addEventListener('loadedmetadata', () => {
+  syncRangesToMetadata();
+  setStatus('loaded instantly. you can clip now.', 'ok');
+});
+
+player.addEventListener('error', () => {
+  setStatus('could not load this audio file on this browser. try mp3 or m4a.', 'error');
+});
 
 fileInput.addEventListener('change', async (e) => {
   await loadFile(e.target.files[0]);
@@ -416,14 +413,19 @@ dropzone.addEventListener('click', () => {
   fileInput.value = '';
   fileInput.click();
 });
+
 dropzone.addEventListener('dragover', (e) => {
   e.preventDefault();
-  dropzone.style.borderColor = '#6d8dff';
+  dropzone.style.borderColor = '#ffffff';
 });
-dropzone.addEventListener('dragleave', () => { dropzone.style.borderColor = '#3e4d6f'; });
+
+dropzone.addEventListener('dragleave', () => {
+  dropzone.style.borderColor = '';
+});
+
 dropzone.addEventListener('drop', async (e) => {
   e.preventDefault();
-  dropzone.style.borderColor = '#3e4d6f';
+  dropzone.style.borderColor = '';
   await loadFile(e.dataTransfer.files?.[0]);
 });
 
@@ -435,6 +437,7 @@ document.getElementById('setStartNow').addEventListener('click', () => {
   startRange.value = String(player.currentTime.toFixed(1));
   updateSelectionLabel();
 });
+
 document.getElementById('setEndNow').addEventListener('click', () => {
   endRange.value = String(player.currentTime.toFixed(1));
   updateSelectionLabel();
@@ -454,16 +457,18 @@ document.getElementById('previewClip').addEventListener('click', () => {
   player.addEventListener('timeupdate', stop);
 });
 
-document.getElementById('saveClip').addEventListener('click', exportWavClip);
+document.getElementById('saveClip').addEventListener('click', exportClip);
 
 document.querySelectorAll('[data-skip]').forEach(btn => {
   btn.addEventListener('click', () => {
-    player.currentTime = Math.max(0, Math.min(player.duration || Infinity, player.currentTime + Number(btn.dataset.skip)));
+    player.currentTime = Math.max(0, Math.min(currentDuration(), player.currentTime + Number(btn.dataset.skip)));
   });
 });
 
 document.querySelectorAll('[data-speed]').forEach(btn => {
-  btn.addEventListener('click', () => { player.playbackRate = Number(btn.dataset.speed); });
+  btn.addEventListener('click', () => {
+    player.playbackRate = Number(btn.dataset.speed);
+  });
 });
 
 document.getElementById('playPause').addEventListener('click', () => {
@@ -472,16 +477,12 @@ document.getElementById('playPause').addEventListener('click', () => {
 });
 
 document.getElementById('suggestOne').addEventListener('click', () => {
-  if (!state.suggestions.length) {
-    state.suggestions = quickSuggestions(player.duration || 0, 8);
-  }
+  if (!state.suggestions.length) state.suggestions = quickSuggestions(currentDuration(), 8);
   renderSuggestions([state.suggestions[0]]);
 });
 
 document.getElementById('suggestFive').addEventListener('click', () => {
-  if (!state.suggestions.length) {
-    state.suggestions = quickSuggestions(player.duration || 0, 12);
-  }
+  if (!state.suggestions.length) state.suggestions = quickSuggestions(currentDuration(), 12);
   const pool = state.suggestions.slice(0, 20);
   const picks = [];
   while (picks.length < 5 && pool.length) {
