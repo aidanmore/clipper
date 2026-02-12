@@ -19,6 +19,7 @@ const endRange = document.getElementById('endRange');
 const selectionInfo = document.getElementById('selectionInfo');
 const suggestionsEl = document.getElementById('suggestions');
 const statusMsg = document.getElementById('statusMsg');
+let mp3LibPromise = null;
 
 function setStatus(message, kind = 'ok') {
   statusMsg.textContent = message || '';
@@ -136,6 +137,64 @@ async function decodeAudio(file) {
   } finally {
     await audioCtx.close();
   }
+}
+
+function loadMp3Library() {
+  if (window.lamejs) return Promise.resolve(window.lamejs);
+  if (mp3LibPromise) return mp3LibPromise;
+
+  mp3LibPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js';
+    script.async = true;
+    script.onload = () => {
+      if (window.lamejs) resolve(window.lamejs);
+      else reject(new Error('mp3 encoder failed to load'));
+    };
+    script.onerror = () => reject(new Error('could not load mp3 encoder'));
+    document.head.appendChild(script);
+  });
+
+  return mp3LibPromise;
+}
+
+function floatTo16BitPCM(floatArray) {
+  const out = new Int16Array(floatArray.length);
+  for (let i = 0; i < floatArray.length; i++) {
+    const s = Math.max(-1, Math.min(1, floatArray[i]));
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return out;
+}
+
+async function encodeMp3FromSelection(start, end) {
+  if (!state.audioBuffer) {
+    setStatus('preparing export… decoding source once for mp3 export.', 'ok');
+    state.audioBuffer = await decodeAudio(state.file);
+    state.envelope = computeEnvelope(state.audioBuffer);
+    drawWaveform();
+  }
+
+  const lame = await loadMp3Library();
+  const sr = state.audioBuffer.sampleRate;
+  const i0 = Math.floor(start * sr);
+  const i1 = Math.floor(end * sr);
+  const left = state.audioBuffer.getChannelData(0).slice(i0, i1);
+  const pcm = floatTo16BitPCM(left);
+
+  const encoder = new lame.Mp3Encoder(1, sr, 128);
+  const blockSize = 1152;
+  const mp3Data = [];
+
+  for (let i = 0; i < pcm.length; i += blockSize) {
+    const chunk = pcm.subarray(i, i + blockSize);
+    const out = encoder.encodeBuffer(chunk);
+    if (out.length > 0) mp3Data.push(new Uint8Array(out));
+  }
+
+  const flush = encoder.flush();
+  if (flush.length > 0) mp3Data.push(new Uint8Array(flush));
+  return new Blob(mp3Data, { type: 'audio/mpeg' });
 }
 
 function computeEnvelope(audioBuffer, bins = 700) {
@@ -320,48 +379,20 @@ async function exportClip() {
     return;
   }
 
-  const stream = player.captureStream ? player.captureStream() : (player.mozCaptureStream ? player.mozCaptureStream() : null);
-  if (!stream || typeof MediaRecorder === 'undefined') {
-    exportClipMarkerJson(start, end);
-    setStatus('direct audio export not supported here. saved clip marker json instead.', 'ok');
-    return;
-  }
-
   try {
-    setStatus('recording clip export in realtime…', 'ok');
-    const chunks = [];
-    const rec = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : undefined });
-    rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-
-    const stopWhen = () => {
-      if (player.currentTime >= end) {
-        player.pause();
-        player.removeEventListener('timeupdate', stopWhen);
-        rec.stop();
-      }
-    };
-
-    await new Promise((resolve, reject) => {
-      rec.onerror = () => reject(new Error('media recorder failed'));
-      rec.onstop = () => resolve();
-      player.currentTime = start;
-      player.play().then(() => {
-        player.addEventListener('timeupdate', stopWhen);
-        rec.start(250);
-      }).catch(reject);
-    });
-
-    const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' });
+    setStatus('exporting mp3…', 'ok');
+    const blob = await encodeMp3FromSelection(start, end);
     const a = document.createElement('a');
     const safeName = (state.file?.name || 'clip').replace(/\.[^/.]+$/, '');
     a.href = URL.createObjectURL(blob);
-    a.download = `${safeName}_${Math.round(start)}-${Math.round(end)}.webm`;
+    a.download = `${safeName}_${Math.round(start)}-${Math.round(end)}.mp3`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-    setStatus('clip exported.', 'ok');
-  } catch {
+    setStatus('clip exported as mp3.', 'ok');
+  } catch (err) {
+    console.error(err);
     exportClipMarkerJson(start, end);
-    setStatus('export fallback used: saved clip marker json.', 'error');
+    setStatus('mp3 export failed. saved clip marker json fallback.', 'error');
   }
 }
 
