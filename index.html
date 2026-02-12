@@ -1,135 +1,84 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>clipper</title>
-  <link rel="stylesheet" href="styles.css" />
-</head>
-<body>
-  <header class="topbar">
-    <div class="brand">
-      <div class="dot"></div>
-      <div>
-        <div class="title">clipper</div>
-        <div class="subtitle">mobile-first podcast clipping</div>
-      </div>
-    </div>
-    <button id="helpBtn" class="ghost">help</button>
-  </header>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>LaughSlice — Comedy Podcast Clipper</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>🎙️ LaughSlice</h1>
+      <p>Drop a long episode, scan fast, clip fast.</p>
+    </header>
 
-  <main class="wrap">
-    <section class="card drop" id="dropZone">
-      <div class="drop-inner">
-        <div class="drop-icon">⬇︎</div>
-        <div class="drop-text">
-          <div class="drop-title">drop audio here</div>
-          <div class="drop-sub">or choose a file</div>
-        </div>
-        <label class="btn">
-         <input
-          type="file"
-          accept=".mp3,.m4a,.wav,.aac,.ogg,audio/mpeg,audio/mp3,audio/mp4,audio/wav,audio/*"
-          />
+    <main class="container">
+      <section class="card upload-card">
+        <h2>1) Add episode</h2>
+        <label class="dropzone" id="dropzone">
+          <input id="fileInput" type="file" accept="audio/*" hidden />
+          <div>
+            <strong>Tap or drop audio</strong>
+            <p>Works great for 1–2 hour comedy podcasts.</p>
+          </div>
         </label>
-      </div>
+        <div id="episodeMeta" class="meta"></div>
+        <div id="statusMsg" class="status" role="status" aria-live="polite"></div>
+      </section>
 
-      <div class="meta" id="fileMeta" hidden>
-        <div class="meta-row">
-          <div class="pill" id="fileName">—</div>
-          <div class="pill" id="fileDur">—</div>
-        </div>
-        <div class="meta-row">
-          <div class="pill subtle" id="decodeStatus">ready</div>
-        </div>
-      </div>
-    </section>
+      <section class="card" id="workspace" hidden>
+        <h2>2) Scan + clip (mobile-first)</h2>
+        <audio id="player" controls preload="metadata"></audio>
 
-    <section class="card player" id="playerCard" hidden>
-      <div class="wave-wrap">
-        <canvas id="wave" height="120"></canvas>
-
-        <!-- selection overlay -->
-        <div class="overlay" id="overlay">
-          <div class="handle left" id="handleL" aria-label="start handle"></div>
-          <div class="handle right" id="handleR" aria-label="end handle"></div>
-          <div class="playhead" id="playhead"></div>
-          <div class="shade left" id="shadeL"></div>
-          <div class="shade right" id="shadeR"></div>
-        </div>
-      </div>
-
-      <div class="timebar">
-        <div class="time" id="timeNow">0:00</div>
-        <div class="time big" id="timeSel">sel 0:00 → 0:00</div>
-        <div class="time" id="timeEnd">0:00</div>
-      </div>
-
-      <div class="controls">
-        <div class="row">
-          <button class="btn small" id="back5">-5s</button>
-          <button class="btn" id="playBtn">play</button>
-          <button class="btn small" id="fwd5">+5s</button>
-          <button class="ghost" id="loopBtn" aria-pressed="false">loop: off</button>
+        <div class="controls-row">
+          <button data-skip="-30">⏪ 30s</button>
+          <button data-skip="-10">↺ 10s</button>
+          <button id="playPause">⏯️</button>
+          <button data-skip="10">10s ↻</button>
+          <button data-skip="30">30s ⏩</button>
         </div>
 
-        <div class="row">
-          <button class="ghost" id="setIn">set in</button>
-          <button class="ghost" id="setOut">set out</button>
-          <button class="ghost" id="fitSel">fit selection</button>
-          <button class="ghost" id="resetSel">reset</button>
+        <div class="controls-row">
+          <button data-speed="1">1x</button>
+          <button data-speed="1.25">1.25x</button>
+          <button data-speed="1.5">1.5x</button>
+          <button data-speed="1.75">1.75x</button>
+          <button data-speed="2">2x</button>
         </div>
 
-        <div class="row">
-          <div class="slider">
-            <div class="slider-label">zoom</div>
-            <input id="zoom" type="range" min="1" max="8" value="2" />
-          </div>
-          <div class="slider">
-            <div class="slider-label">speed</div>
-            <input id="speed" type="range" min="0.6" max="2.0" step="0.05" value="1.0" />
-          </div>
+        <canvas id="waveform" width="1200" height="180" aria-label="Episode waveform"></canvas>
+
+        <div class="range-grid">
+          <label>
+            Start
+            <input id="startRange" type="range" min="0" value="0" step="0.1" />
+          </label>
+          <label>
+            End
+            <input id="endRange" type="range" min="0" value="0" step="0.1" />
+          </label>
         </div>
 
-        <div class="row">
-          <button class="btn" id="saveClip">save clip</button>
-          <button class="ghost" id="suggestBtn">suggest a funny clip</button>
+        <div class="selection-row">
+          <div id="selectionInfo">No clip selected yet.</div>
+          <button id="setStartNow">Set start = now</button>
+          <button id="setEndNow">Set end = now</button>
+          <button id="previewClip">Preview clip</button>
+          <button id="saveClip" class="primary">Export clip</button>
         </div>
+      </section>
 
-        <div class="hint" id="hint">
-          tip: drag the handles. tap waveform to jump. swipe left/right on waveform area to scrub.
+      <section class="card" id="aiPanel" hidden>
+        <h2>3) Smart funny suggestions</h2>
+        <p class="hint">Analyzes energy spikes + conversational burstiness to surface likely one-liners/riffs/laugh peaks.</p>
+        <div class="controls-row">
+          <button id="suggestOne" class="primary">✨ Suggest best clip</button>
+          <button id="suggestFive">🎲 Suggest 5 fun clips</button>
         </div>
-      </div>
-    </section>
+        <div id="suggestions" class="suggestions"></div>
+      </section>
+    </main>
 
-    <section class="card clips" id="clipsCard" hidden>
-      <div class="clips-head">
-        <div>
-          <div class="clips-title">clips</div>
-          <div class="clips-sub">saved segments ready to export</div>
-        </div>
-        <button class="ghost" id="clearClips">clear</button>
-      </div>
-      <div id="clipsList" class="clips-list"></div>
-    </section>
-  </main>
-
-  <dialog id="help">
-    <div class="dialog">
-      <div class="dialog-title">how it works</div>
-      <ul class="dialog-list">
-        <li>drop a long audio file, wait for waveform.</li>
-        <li>tap to set playhead, drag handles for in/out.</li>
-        <li>hit <b>save clip</b> to create an export card.</li>
-        <li><b>suggest a funny clip</b> scans for high-energy bursty moments (often laughs).</li>
-      </ul>
-      <div class="dialog-actions">
-        <button id="closeHelp" class="btn">ok</button>
-      </div>
-    </div>
-  </dialog>
-
-  <audio id="audio" preload="metadata" playsinline></audio>
-  <script src="app.js"></script>
-</body>
+    <script src="app.js"></script>
+  </body>
 </html>
