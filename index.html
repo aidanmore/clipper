@@ -3,27 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>LaughSlice — Comedy Podcast Clipper</title>
+    <title>clipper</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header class="topbar">
-      <h1>🎙️ LaughSlice</h1>
-      <p>Drop a long episode, scan fast, clip fast.</p>
+      <h1>clipper</h1>
+      <p>drop an episode. scan fast. clip fast.</p>
     </header>
 
     <main class="container">
       <section class="card upload-card">
-        <h2>1) Add episode</h2>
+        <h2>1) add episode</h2>
         <label class="dropzone" id="dropzone">
           <input
-  type="file"
-  accept=".mp3,.m4a,.wav,.aac,.ogg,audio/mpeg,audio/mp3,audio/mp4,audio/wav,audio/*"
-/>
-
+            id="fileInput"
+            type="file"
+            accept=".mp3,.wav,.m4a,.aac,.ogg,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/ogg"
+            hidden
+          />
           <div>
-            <strong>Tap or drop audio</strong>
-            <p>Works great for 1–2 hour comedy podcasts.</p>
+            <strong>tap or drop audio</strong>
+            <p>works for long comedy episodes.</p>
           </div>
         </label>
         <div id="episodeMeta" class="meta"></div>
@@ -31,15 +32,15 @@
       </section>
 
       <section class="card" id="workspace" hidden>
-        <h2>2) Scan + clip (mobile-first)</h2>
+        <h2>2) scan + clip</h2>
         <audio id="player" controls preload="metadata"></audio>
 
         <div class="controls-row">
-          <button data-skip="-30">⏪ 30s</button>
-          <button data-skip="-10">↺ 10s</button>
-          <button id="playPause">⏯️</button>
-          <button data-skip="10">10s ↻</button>
-          <button data-skip="30">30s ⏩</button>
+          <button data-skip="-30">back 30s</button>
+          <button data-skip="-10">back 10s</button>
+          <button id="playPause">play / pause</button>
+          <button data-skip="10">fwd 10s</button>
+          <button data-skip="30">fwd 30s</button>
         </div>
 
         <div class="controls-row">
@@ -50,34 +51,34 @@
           <button data-speed="2">2x</button>
         </div>
 
-        <canvas id="waveform" width="1200" height="180" aria-label="Episode waveform"></canvas>
+        <canvas id="waveform" width="1200" height="180" aria-label="episode waveform"></canvas>
 
         <div class="range-grid">
           <label>
-            Start
+            start
             <input id="startRange" type="range" min="0" value="0" step="0.1" />
           </label>
           <label>
-            End
+            end
             <input id="endRange" type="range" min="0" value="0" step="0.1" />
           </label>
         </div>
 
         <div class="selection-row">
-          <div id="selectionInfo">No clip selected yet.</div>
-          <button id="setStartNow">Set start = now</button>
-          <button id="setEndNow">Set end = now</button>
-          <button id="previewClip">Preview clip</button>
-          <button id="saveClip" class="primary">Export clip</button>
+          <div id="selectionInfo">no clip selected yet.</div>
+          <button id="setStartNow">set start = now</button>
+          <button id="setEndNow">set end = now</button>
+          <button id="previewClip">preview clip</button>
+          <button id="saveClip" class="primary">export clip</button>
         </div>
       </section>
 
       <section class="card" id="aiPanel" hidden>
-        <h2>3) Smart funny suggestions</h2>
-        <p class="hint">Analyzes energy spikes + conversational burstiness to surface likely one-liners/riffs/laugh peaks.</p>
+        <h2>3) smart suggestions</h2>
+        <p class="hint">finds likely one-liners, riffs, and laugh peaks.</p>
         <div class="controls-row">
-          <button id="suggestOne" class="primary">✨ Suggest best clip</button>
-          <button id="suggestFive">🎲 Suggest 5 fun clips</button>
+          <button id="suggestOne" class="primary">suggest best clip</button>
+          <button id="suggestFive">suggest 5 clips</button>
         </div>
         <div id="suggestions" class="suggestions"></div>
       </section>
