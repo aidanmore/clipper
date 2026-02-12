@@ -172,6 +172,96 @@ function floatTo16BitPCM(floatArray) {
   return out;
 }
 
+async function waitForAudioReady(audio, timeoutMs = 12000) {
+  if (Number.isFinite(audio.duration) && audio.duration > 0) return;
+  await new Promise((resolve, reject) => {
+    const done = () => {
+      cleanup();
+      resolve();
+    };
+    const fail = () => {
+      cleanup();
+      reject(new Error('audio failed to load for export'));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('audio load timeout during export'));
+    }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timer);
+      audio.removeEventListener('loadedmetadata', done);
+      audio.removeEventListener('canplay', done);
+      audio.removeEventListener('error', fail);
+    };
+    audio.addEventListener('loadedmetadata', done, { once: true });
+    audio.addEventListener('canplay', done, { once: true });
+    audio.addEventListener('error', fail, { once: true });
+  });
+}
+
+async function exportMp3RealtimeFromPlayback(start, end) {
+  const lame = await loadMp3Library();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) throw new Error('web audio unavailable for realtime mp3 export');
+
+  const tempAudio = new Audio(state.audioUrl);
+  tempAudio.preload = 'auto';
+  tempAudio.playsInline = true;
+  await waitForAudioReady(tempAudio);
+
+  const ctx = new AudioCtx();
+  if (ctx.state === 'suspended') await ctx.resume();
+
+  const source = ctx.createMediaElementSource(tempAudio);
+  const processor = ctx.createScriptProcessor(4096, 1, 1);
+  const mute = ctx.createGain();
+  mute.gain.value = 0;
+
+  const encoder = new lame.Mp3Encoder(1, ctx.sampleRate, 128);
+  const chunks = [];
+
+  processor.onaudioprocess = (event) => {
+    const input = event.inputBuffer.getChannelData(0);
+    const output = event.outputBuffer.getChannelData(0);
+    output.set(input);
+
+    if (tempAudio.currentTime < start || tempAudio.currentTime > end + 0.1) return;
+    const pcm = floatTo16BitPCM(input);
+    const mp3buf = encoder.encodeBuffer(pcm);
+    if (mp3buf.length > 0) chunks.push(new Uint8Array(mp3buf));
+  };
+
+  source.connect(processor);
+  processor.connect(mute);
+  mute.connect(ctx.destination);
+
+  tempAudio.currentTime = start;
+  await tempAudio.play();
+
+  await new Promise((resolve) => {
+    const stopWhenDone = () => {
+      if (tempAudio.currentTime >= end) {
+        tempAudio.pause();
+        tempAudio.removeEventListener('timeupdate', stopWhenDone);
+        resolve();
+      }
+    };
+    tempAudio.addEventListener('timeupdate', stopWhenDone);
+    tempAudio.addEventListener('ended', resolve, { once: true });
+  });
+
+  const flush = encoder.flush();
+  if (flush.length > 0) chunks.push(new Uint8Array(flush));
+
+  source.disconnect();
+  processor.disconnect();
+  mute.disconnect();
+  await ctx.close();
+  tempAudio.src = '';
+
+  return new Blob(chunks, { type: 'audio/mpeg' });
+}
+
 async function encodeMp3FromSelection(start, end) {
   if (!state.audioBuffer) {
     setStatus('preparing export… decoding source once for mp3 export.', 'ok');
@@ -436,8 +526,15 @@ async function exportClip() {
     }
 
     if (isIOS()) {
-      exportClipMarkerJson(start, end);
-      setStatus('ios export fallback used: saved clip marker json to avoid browser crash.', 'error');
+      setStatus('ios mode: exporting mp3 in realtime…', 'ok');
+      const blob = await exportMp3RealtimeFromPlayback(start, end);
+      const a = document.createElement('a');
+      const safeName = (state.file?.name || 'clip').replace(/\.[^/.]+$/, '');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${safeName}_${Math.round(start)}-${Math.round(end)}.mp3`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      setStatus('clip exported as mp3.', 'ok');
       return;
     }
 
