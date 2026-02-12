@@ -406,12 +406,9 @@ player.addEventListener('error', () => {
 });
 
 fileInput.addEventListener('change', async (e) => {
-  await loadFile(e.target.files[0]);
-});
-
-dropzone.addEventListener('click', () => {
+  const f = e.target.files?.[0];
+  await loadFile(f);
   fileInput.value = '';
-  fileInput.click();
 });
 
 dropzone.addEventListener('dragover', (e) => {
