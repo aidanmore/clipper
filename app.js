@@ -21,6 +21,11 @@ const suggestionsEl = document.getElementById('suggestions');
 const statusMsg = document.getElementById('statusMsg');
 let mp3LibPromise = null;
 
+function isIOS() {
+  const ua = navigator.userAgent || '';
+  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 
 function setStatus(message, kind = 'ok') {
   statusMsg.textContent = message || '';
@@ -166,6 +171,88 @@ function floatTo16BitPCM(floatArray) {
     out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
   }
   return out;
+}
+
+async function waitForAudioReady(audio, timeoutMs = 10000) {
+  if (Number.isFinite(audio.duration) && audio.duration > 0) return;
+  await new Promise((resolve, reject) => {
+    const done = () => { cleanup(); resolve(); };
+    const fail = () => { cleanup(); reject(new Error('audio failed to load for export')); };
+    const timer = setTimeout(() => { cleanup(); reject(new Error('audio load timeout during export')); }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timer);
+      audio.removeEventListener('loadedmetadata', done);
+      audio.removeEventListener('canplay', done);
+      audio.removeEventListener('error', fail);
+    };
+    audio.addEventListener('loadedmetadata', done, { once: true });
+    audio.addEventListener('canplay', done, { once: true });
+    audio.addEventListener('error', fail, { once: true });
+  });
+}
+
+async function exportMp3RealtimeFromPlayback(start, end) {
+  const lame = await loadMp3Library();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) throw new Error('web audio unavailable for realtime mp3 export');
+
+  const tempAudio = new Audio(state.audioUrl);
+  tempAudio.preload = 'auto';
+  tempAudio.playsInline = true;
+  await waitForAudioReady(tempAudio);
+
+  const ctx = new AudioCtx();
+  if (ctx.state === 'suspended') await ctx.resume();
+
+  const source = ctx.createMediaElementSource(tempAudio);
+  const processor = ctx.createScriptProcessor(8192, 1, 1);
+  const mute = ctx.createGain();
+  mute.gain.value = 0;
+
+  const encoder = new lame.Mp3Encoder(1, ctx.sampleRate, 128);
+  const chunks = [];
+
+  processor.onaudioprocess = (event) => {
+    const input = event.inputBuffer.getChannelData(0);
+    const output = event.outputBuffer.getChannelData(0);
+    output.set(input);
+
+    if (tempAudio.currentTime < start || tempAudio.currentTime > end + 0.08) return;
+    const pcm = floatTo16BitPCM(input);
+    const mp3buf = encoder.encodeBuffer(pcm);
+    if (mp3buf.length > 0) chunks.push(new Uint8Array(mp3buf));
+  };
+
+  source.connect(processor);
+  processor.connect(mute);
+  mute.connect(ctx.destination);
+
+  try {
+    tempAudio.currentTime = start;
+    await tempAudio.play();
+
+    await new Promise((resolve) => {
+      const stopWhenDone = () => {
+        if (tempAudio.currentTime >= end) {
+          tempAudio.pause();
+          tempAudio.removeEventListener('timeupdate', stopWhenDone);
+          resolve();
+        }
+      };
+      tempAudio.addEventListener('timeupdate', stopWhenDone);
+      tempAudio.addEventListener('ended', resolve, { once: true });
+    });
+
+    const flush = encoder.flush();
+    if (flush.length > 0) chunks.push(new Uint8Array(flush));
+    return new Blob(chunks, { type: 'audio/mpeg' });
+  } finally {
+    try { source.disconnect(); } catch {}
+    try { processor.disconnect(); } catch {}
+    try { mute.disconnect(); } catch {}
+    try { await ctx.close(); } catch {}
+    tempAudio.src = '';
+  }
 }
 
 
@@ -387,57 +474,15 @@ async function exportClip() {
   }
 
   try {
-    const stream = player.captureStream ? player.captureStream() : (player.mozCaptureStream ? player.mozCaptureStream() : null);
-    const canRecord = !!stream && typeof MediaRecorder !== 'undefined';
-
-    if (canRecord) {
-      setStatus('fast export running…', 'ok');
-      const chunks = [];
-      const mimeCandidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
-      let selectedMime = '';
-      for (const m of mimeCandidates) {
-        if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) {
-          selectedMime = m;
-          break;
-        }
-      }
-
-      const rec = selectedMime ? new MediaRecorder(stream, { mimeType: selectedMime }) : new MediaRecorder(stream);
-      rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-
-      const stopWhen = () => {
-        if (player.currentTime >= end) {
-          player.pause();
-          player.removeEventListener('timeupdate', stopWhen);
-          rec.stop();
-        }
-      };
-
-      await new Promise((resolve, reject) => {
-        rec.onerror = () => reject(new Error('media recorder failed'));
-        rec.onstop = () => resolve();
-        player.currentTime = start;
-        player.play().then(() => {
-          player.addEventListener('timeupdate', stopWhen);
-          rec.start(250);
-        }).catch(reject);
-      });
-
-      const outType = chunks[0]?.type || selectedMime || 'audio/webm';
-      const ext = outType.includes('mp4') ? 'm4a' : 'webm';
-      const blob = new Blob(chunks, { type: outType });
-      const a = document.createElement('a');
-      const safeName = (state.file?.name || 'clip').replace(/\.[^/.]+$/, '');
-      a.href = URL.createObjectURL(blob);
-      a.download = `${safeName}_${Math.round(start)}-${Math.round(end)}.${ext}`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-      setStatus(`clip exported fast as ${ext}.`, 'ok');
-      return;
+    let blob;
+    if (isIOS()) {
+      setStatus('ios export: creating mp3 in realtime…', 'ok');
+      blob = await exportMp3RealtimeFromPlayback(start, end);
+    } else {
+      setStatus('exporting mp3…', 'ok');
+      blob = await encodeMp3FromSelection(start, end);
     }
 
-    setStatus('fast export unavailable here. exporting mp3…', 'ok');
-    const blob = await encodeMp3FromSelection(start, end);
     const a = document.createElement('a');
     const safeName = (state.file?.name || 'clip').replace(/\.[^/.]+$/, '');
     a.href = URL.createObjectURL(blob);
@@ -448,7 +493,7 @@ async function exportClip() {
   } catch (err) {
     console.error(err);
     exportClipMarkerJson(start, end);
-    setStatus('export failed. saved clip marker json fallback.', 'error');
+    setStatus('mp3 export failed. saved clip marker json fallback.', 'error');
   }
 }
 
