@@ -21,10 +21,6 @@ const suggestionsEl = document.getElementById('suggestions');
 const statusMsg = document.getElementById('statusMsg');
 let mp3LibPromise = null;
 
-function isIOS() {
-  const ua = navigator.userAgent || '';
-  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
 
 function setStatus(message, kind = 'ok') {
   statusMsg.textContent = message || '';
@@ -172,95 +168,6 @@ function floatTo16BitPCM(floatArray) {
   return out;
 }
 
-async function waitForAudioReady(audio, timeoutMs = 12000) {
-  if (Number.isFinite(audio.duration) && audio.duration > 0) return;
-  await new Promise((resolve, reject) => {
-    const done = () => {
-      cleanup();
-      resolve();
-    };
-    const fail = () => {
-      cleanup();
-      reject(new Error('audio failed to load for export'));
-    };
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error('audio load timeout during export'));
-    }, timeoutMs);
-    const cleanup = () => {
-      clearTimeout(timer);
-      audio.removeEventListener('loadedmetadata', done);
-      audio.removeEventListener('canplay', done);
-      audio.removeEventListener('error', fail);
-    };
-    audio.addEventListener('loadedmetadata', done, { once: true });
-    audio.addEventListener('canplay', done, { once: true });
-    audio.addEventListener('error', fail, { once: true });
-  });
-}
-
-async function exportMp3RealtimeFromPlayback(start, end) {
-  const lame = await loadMp3Library();
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  if (!AudioCtx) throw new Error('web audio unavailable for realtime mp3 export');
-
-  const tempAudio = new Audio(state.audioUrl);
-  tempAudio.preload = 'auto';
-  tempAudio.playsInline = true;
-  await waitForAudioReady(tempAudio);
-
-  const ctx = new AudioCtx();
-  if (ctx.state === 'suspended') await ctx.resume();
-
-  const source = ctx.createMediaElementSource(tempAudio);
-  const processor = ctx.createScriptProcessor(4096, 1, 1);
-  const mute = ctx.createGain();
-  mute.gain.value = 0;
-
-  const encoder = new lame.Mp3Encoder(1, ctx.sampleRate, 128);
-  const chunks = [];
-
-  processor.onaudioprocess = (event) => {
-    const input = event.inputBuffer.getChannelData(0);
-    const output = event.outputBuffer.getChannelData(0);
-    output.set(input);
-
-    if (tempAudio.currentTime < start || tempAudio.currentTime > end + 0.1) return;
-    const pcm = floatTo16BitPCM(input);
-    const mp3buf = encoder.encodeBuffer(pcm);
-    if (mp3buf.length > 0) chunks.push(new Uint8Array(mp3buf));
-  };
-
-  source.connect(processor);
-  processor.connect(mute);
-  mute.connect(ctx.destination);
-
-  tempAudio.currentTime = start;
-  await tempAudio.play();
-
-  await new Promise((resolve) => {
-    const stopWhenDone = () => {
-      if (tempAudio.currentTime >= end) {
-        tempAudio.pause();
-        tempAudio.removeEventListener('timeupdate', stopWhenDone);
-        resolve();
-      }
-    };
-    tempAudio.addEventListener('timeupdate', stopWhenDone);
-    tempAudio.addEventListener('ended', resolve, { once: true });
-  });
-
-  const flush = encoder.flush();
-  if (flush.length > 0) chunks.push(new Uint8Array(flush));
-
-  source.disconnect();
-  processor.disconnect();
-  mute.disconnect();
-  await ctx.close();
-  tempAudio.src = '';
-
-  return new Blob(chunks, { type: 'audio/mpeg' });
-}
 
 async function encodeMp3FromSelection(start, end) {
   if (!state.audioBuffer) {
@@ -366,19 +273,25 @@ function analyzeSuggestionsFromBuffer() {
 function quickSuggestions(duration, count = 8) {
   const dur = Math.max(30, duration || 3600);
   const picks = [];
-  const baseZones = [0.08, 0.18, 0.32, 0.48, 0.62, 0.74, 0.86];
-  const clipLen = Math.min(24, Math.max(12, dur * 0.04));
+  const clipMin = 12;
+  const clipMax = 38;
 
-  for (let i = 0; i < count; i++) {
-    const z = baseZones[i % baseZones.length];
-    const jitter = (Math.random() - 0.5) * 0.08;
-    let start = Math.max(0, (z + jitter) * dur);
-    start = Math.min(start, Math.max(0, dur - clipLen));
-    const end = Math.min(dur, start + clipLen);
-    const type = i % 3 === 0 ? 'riff' : (i % 5 === 0 ? 'big-laugh' : 'one-liner');
-    picks.push({ start, end, score: 0.55 - i * 0.02, type, reasons: ['instant pick', 'no full decode required'] });
+  while (picks.length < count) {
+    const clipLen = clipMin + Math.random() * (clipMax - clipMin);
+    let start = Math.random() * Math.max(1, dur - clipLen);
+
+    const tooClose = picks.some(p => Math.abs(p.start - start) < 10);
+    if (tooClose) continue;
+
+    start = Math.max(0, Math.min(start, dur - clipLen));
+    picks.push({
+      start,
+      end: Math.min(dur, start + clipLen),
+      score: 0.5 + Math.random() * 0.5
+    });
   }
-  return picks;
+
+  return picks.sort((a, b) => a.start - b.start);
 }
 
 function renderSuggestions(items) {
@@ -387,8 +300,7 @@ function renderSuggestions(items) {
     const card = document.createElement('div');
     card.className = 'suggestion';
     card.innerHTML = `
-      <div><span class="type">${s.type}</span> • ${fmt(s.start)} → ${fmt(s.end)} • score ${s.score.toFixed(2)}</div>
-      <small>${s.reasons.join(' · ')}</small>
+      <div>${fmt(s.start)} → ${fmt(s.end)}</div>
       <div class="controls-row">
         <button data-jump="${s.start}">jump</button>
         <button data-apply="${idx}">use as clip</button>
@@ -428,7 +340,7 @@ async function maybeRunBackgroundAnalysis() {
   }
 
   state.analysisRunning = true;
-  setStatus('instant mode ready. building smart suggestions in background…', 'ok');
+  setStatus('instant mode ready. building quick random pool in background…', 'ok');
   try {
     state.audioBuffer = await decodeAudio(state.file);
     state.envelope = computeEnvelope(state.audioBuffer);
@@ -436,7 +348,7 @@ async function maybeRunBackgroundAnalysis() {
     if (!state.suggestions.length) state.suggestions = quickSuggestions(currentDuration(), 12);
     renderSuggestions(state.suggestions.slice(0, 5));
     drawWaveform();
-    setStatus('loaded and analyzed. ready to clip.', 'ok');
+    setStatus('loaded. ready to clip.', 'ok');
   } catch {
     state.audioBuffer = null;
     state.envelope = [];
@@ -475,12 +387,11 @@ async function exportClip() {
   }
 
   try {
-    // iOS Safari can hard-refresh the page when large decode/encode work runs in-memory.
-    // Prefer realtime recorder path there to avoid full decode memory spikes.
     const stream = player.captureStream ? player.captureStream() : (player.mozCaptureStream ? player.mozCaptureStream() : null);
     const canRecord = !!stream && typeof MediaRecorder !== 'undefined';
+
     if (canRecord) {
-      setStatus('exporting clip…', 'ok');
+      setStatus('fast export running…', 'ok');
       const chunks = [];
       const mimeCandidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
       let selectedMime = '';
@@ -521,24 +432,11 @@ async function exportClip() {
       a.download = `${safeName}_${Math.round(start)}-${Math.round(end)}.${ext}`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-      setStatus(`clip exported as ${ext}.`, 'ok');
+      setStatus(`clip exported fast as ${ext}.`, 'ok');
       return;
     }
 
-    if (isIOS()) {
-      setStatus('ios mode: exporting mp3 in realtime…', 'ok');
-      const blob = await exportMp3RealtimeFromPlayback(start, end);
-      const a = document.createElement('a');
-      const safeName = (state.file?.name || 'clip').replace(/\.[^/.]+$/, '');
-      a.href = URL.createObjectURL(blob);
-      a.download = `${safeName}_${Math.round(start)}-${Math.round(end)}.mp3`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-      setStatus('clip exported as mp3.', 'ok');
-      return;
-    }
-
-    setStatus('exporting mp3…', 'ok');
+    setStatus('fast export unavailable here. exporting mp3…', 'ok');
     const blob = await encodeMp3FromSelection(start, end);
     const a = document.createElement('a');
     const safeName = (state.file?.name || 'clip').replace(/\.[^/.]+$/, '');
@@ -550,7 +448,7 @@ async function exportClip() {
   } catch (err) {
     console.error(err);
     exportClipMarkerJson(start, end);
-    setStatus('mp3 export failed. saved clip marker json fallback.', 'error');
+    setStatus('export failed. saved clip marker json fallback.', 'error');
   }
 }
 
@@ -572,7 +470,7 @@ async function loadFile(file) {
     setRanges(3600);
     drawWaveform();
 
-    suggestionsEl.innerHTML = '<div class="suggestion">ready. tap suggest to get instant picks.</div>';
+    suggestionsEl.innerHTML = '<div class="suggestion">ready. tap random 1 or random 5 to spin new timestamps.</div>';
     episodeMeta.textContent = `${file.name} • ${((file.size) / (1024 * 1024)).toFixed(1)} mb`;
 
     player.src = state.audioUrl;
@@ -663,20 +561,13 @@ document.getElementById('playPause').addEventListener('click', () => {
 });
 
 document.getElementById('suggestOne').addEventListener('click', () => {
-  if (!state.suggestions.length) state.suggestions = quickSuggestions(currentDuration(), 8);
-  renderSuggestions([state.suggestions[0]]);
+  const picks = quickSuggestions(currentDuration(), 1);
+  state.suggestions = picks;
+  renderSuggestions(picks);
 });
 
 document.getElementById('suggestFive').addEventListener('click', () => {
-  if (!state.suggestions.length) state.suggestions = quickSuggestions(currentDuration(), 12);
-  const pool = state.suggestions.slice(0, 20);
-  const picks = [];
-  while (picks.length < 5 && pool.length) {
-    const idx = Math.floor(Math.random() * pool.length);
-    const cand = pool.splice(idx, 1)[0];
-    if (!picks.some(p => Math.max(0, Math.min(p.end, cand.end) - Math.max(p.start, cand.start)) > 3)) {
-      picks.push(cand);
-    }
-  }
+  const picks = quickSuggestions(currentDuration(), 5);
+  state.suggestions = picks;
   renderSuggestions(picks);
 });
