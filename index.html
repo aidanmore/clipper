@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
     <title>clipper</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -24,6 +24,7 @@
           />
           <div>
             <strong>tap or drop audio</strong>
+            <p>works for long comedy episodes.</p>
           </div>
         </div>
         <div id="episodeMeta" class="meta"></div>
@@ -73,11 +74,11 @@
       </section>
 
       <section class="card" id="aiPanel" hidden>
-        <h2>3) smart suggestions</h2>
-        <p class="hint">finds likely one-liners, riffs, and laugh peaks.</p>
+        <h2>3) random clip ideas</h2>
+        <p class="hint">tap repeatedly to get different timestamps fast.</p>
         <div class="controls-row">
-          <button id="suggestOne" class="primary">suggest best clip</button>
-          <button id="suggestFive">suggest 5 clips</button>
+          <button id="suggestOne" class="primary">random 1</button>
+          <button id="suggestFive">random 5</button>
         </div>
         <div id="suggestions" class="suggestions"></div>
       </section>
