@@ -9,13 +9,29 @@
   --muted: #a7a7a7;
 }
 
-* { box-sizing: border-box; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 body {
   margin: 0;
   font-family: "Arial Narrow", "Arial Narrow Bold", Arial, Helvetica, sans-serif;
   background: var(--bg);
   color: var(--text);
+}
+
+
+html, body {
+  touch-action: manipulation;
+}
+
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+input, button, canvas, .dropzone {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .topbar {
