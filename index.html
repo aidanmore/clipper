@@ -1,89 +1,439 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
-    <title>clipper</title>
-     <link rel="icon" href="pcrp.ico" type="image/x-icon">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#121313" />
+    <meta name="description" content="The Yellow Five clipping desk. Find the bit, make the cut." />
+    <title>clipper — yellow five</title>
+    <link rel="icon" href="pcrp.ico" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <h1>clipper</h1>
-      <p>drop an episode. scan fast. clip fast.</p>
-    </header>
-
-    <main class="container">
-      <section class="card upload-card">
-        <h2>1) add episode</h2>
-        <div class="dropzone" id="dropzone">
-          <input
-            id="fileInput"
-            class="file-input-overlay"
-            type="file"
-            accept=".mp3,.wav,.m4a,.aac,.ogg,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/ogg"
-          />
+    <aside class="sidebar">
+      <a class="brand" href="#" id="homeLink"
+        >clipper<span class="brand-dot">*</span><small>YELLOW FIVE / EDITING DESK</small></a
+      >
+      <button class="button accent wide" id="addEpisode">+ add an episode</button>
+      <div class="sidebar-label">YOUR PROJECTS <span id="projectCount">0</span></div>
+      <nav id="projects" aria-label="Saved episodes">
+        <p class="muted small">Your episodes will live here.</p>
+      </nav>
+      <div class="sidebar-bottom">
+        <button class="text-button" id="connectionButton">
+          <span class="connection-dot"></span> workspace settings</button
+        ><a href="legacy/" class="small muted">open original clipper ↗</a>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topline">
+        <span id="breadcrumb">THE CUTTING ROOM</span>
+        <div>
+          <span id="saveStatus" role="status">ready when you are</span
+          ><button class="text-button mobile-add" id="mobileAdd">+ episode</button
+          ><button class="icon-button" id="helpButton" aria-label="Keyboard shortcuts">?</button>
+        </div>
+      </header>
+      <section id="welcome" class="welcome">
+        <div class="eyebrow">LESS SCRUBBING. MORE GOOD BITS.</div>
+        <h1>Your next good clip<br />is in there<span class="accent-text">.</span></h1>
+        <p class="welcome-copy">
+          Find the exchange worth keeping. Hear the whole bit.<br class="desktop-only" />
+          Make the cut, and get it out into the world.
+        </p>
+        <div class="button-row">
+          <button class="button accent" id="startButton">open the episode library ↗</button
+          ><button class="button" id="demoButton">take a look around</button>
+        </div>
+        <div class="welcome-rule"></div>
+        <div class="intro-grid">
           <div>
-            <strong>tap or drop audio</strong>
+            <span class="step">01 / FIND</span>
+            <h3>Start with the moment.</h3>
+            <p>Browse your episodes, search the words, or ask for promising exchanges.</p>
+          </div>
+          <div>
+            <span class="step">02 / LISTEN</span>
+            <h3>Keep what lands.</h3>
+            <p>Audition, add context, and shape the beginning and ending.</p>
+          </div>
+          <div>
+            <span class="step">03 / CUT</span>
+            <h3>Ready for the next thing.</h3>
+            <p>Save a shortlist. Export audio, captions, and the words that go with it.</p>
           </div>
         </div>
-        <div id="episodeMeta" class="meta"></div>
-        <div id="statusMsg" class="status" role="status" aria-live="polite"></div>
+        <p id="welcomeNote" class="muted small">
+          Connect your private workspace to get started. The editor tour uses sample text and a test
+          tone.
+        </p>
       </section>
-
-      <section class="card" id="workspace" hidden>
-        <h2>2) scan + clip</h2>
-        <audio id="player" controls preload="metadata"></audio>
-
-        <div class="controls-row">
-          <button data-skip="-30">back 30s</button>
-          <button data-skip="-10">back 10s</button>
-          <button id="playPause">play / pause</button>
-          <button data-skip="10">fwd 10s</button>
-          <button data-skip="30">fwd 30s</button>
+      <section id="studio" hidden>
+        <div class="episode-heading">
+          <div>
+            <div class="eyebrow" id="episodeInfo">EPISODE</div>
+            <h1 id="episodeTitle"></h1>
+          </div>
+          <button class="text-button" id="projectMenu">project options ↗</button>
         </div>
-
-        <div class="controls-row">
-          <button data-speed="1">1x</button>
-          <button data-speed="1.25">1.25x</button>
-          <button data-speed="1.5">1.5x</button>
-          <button data-speed="1.75">1.75x</button>
-          <button data-speed="2">2x</button>
+        <div id="processing" class="processing" hidden>
+          <span class="pulse"></span>
+          <span id="processingText"></span>
+          <button class="text-button" id="cancelProcessing" hidden>cancel next steps</button>
+          <button class="text-button" id="retryButton" hidden>retry</button>
         </div>
-
-        <canvas id="waveform" width="1200" height="180" aria-label="episode waveform"></canvas>
-
-        <div class="range-grid">
-          <label>
-            start
-            <input id="startRange" type="range" min="0" value="0" step="0.1" />
-          </label>
-          <label>
-            end
-            <input id="endRange" type="range" min="0" value="0" step="0.1" />
-          </label>
-        </div>
-
-        <div class="selection-row">
-          <div id="selectionInfo">no clip selected yet.</div>
-          <button id="setStartNow">set start = now</button>
-          <button id="setEndNow">set end = now</button>
-          <button id="previewClip">preview clip</button>
-          <button id="saveClip" class="primary">export clip</button>
+        <div class="studio-grid">
+          <section class="editor-panel">
+            <div class="panel-label">
+              <span>ON THE DESK</span><span id="candidatePosition"></span>
+            </div>
+            <div id="candidateIntro">
+              <h2>Find something worth keeping.</h2>
+              <p class="muted">
+                Choose a suggestion, search the transcript, or mark a moment while you listen.
+              </p>
+            </div>
+            <div class="editor-title-row">
+              <input
+                id="clipTitle"
+                class="title-input"
+                aria-label="Clip title"
+                placeholder="give this clip a name"
+              /><span class="duration-pill" id="clipDuration">0.0s</span>
+            </div>
+            <div class="button-row variants">
+              <button class="chip" id="shortVersion">short cut</button
+              ><button class="chip" id="fullVersion">full bit</button
+              ><button class="text-button" id="leadIn">hear lead-in ↶</button>
+            </div>
+            <div class="wave-header">
+              <span id="viewLabel">EPISODE OVERVIEW</span>
+              <div>
+                <button class="text-button" id="zoomOut">− zoom</button
+                ><button class="text-button" id="zoomIn">+ zoom</button
+                ><button class="text-button" id="fitSelection">fit clip</button>
+              </div>
+            </div>
+            <canvas id="overview" height="50" aria-label="Episode overview; click to seek"></canvas>
+            <div class="wave-detail">
+              <canvas
+                id="waveform"
+                height="152"
+                tabindex="0"
+                aria-label="Detailed waveform. Drag clip edges or use the timing inputs below."
+              ></canvas>
+              <div class="wave-ticks">
+                <span id="viewStart">00:00</span><span id="viewEnd">00:00</span>
+              </div>
+            </div>
+            <div class="trim-grid">
+              <div>
+                <label for="startTime">IN</label>
+                <div class="time-control">
+                  <button data-nudge="start:-0.1" aria-label="Move start back 0.1 seconds">−</button
+                  ><input id="startTime" aria-label="Clip start time" /><button
+                    data-nudge="start:0.1"
+                    aria-label="Move start forward 0.1 seconds"
+                  >
+                    +
+                  </button>
+                </div>
+                <button class="text-button" id="markStart">set to playhead <kbd>I</kbd></button>
+              </div>
+              <div>
+                <label for="endTime">OUT</label>
+                <div class="time-control">
+                  <button data-nudge="end:-0.1" aria-label="Move end back 0.1 seconds">−</button
+                  ><input id="endTime" aria-label="Clip end time" /><button
+                    data-nudge="end:0.1"
+                    aria-label="Move end forward 0.1 seconds"
+                  >
+                    +
+                  </button>
+                </div>
+                <button class="text-button" id="markEnd">set to playhead <kbd>O</kbd></button>
+              </div>
+            </div>
+            <div class="boundary-row">
+              <button class="text-button" id="previousSentence">← include previous sentence</button
+              ><button class="text-button" id="nextSentence">include next sentence →</button>
+            </div>
+            <div class="button-row editor-actions">
+              <button class="button accent" id="keepClip">+ keep this clip <kbd>K</kbd></button
+              ><button class="button" id="skipClip">skip / next</button
+              ><button class="icon-button" id="undoButton" aria-label="Undo edit">↶</button
+              ><button class="icon-button" id="redoButton" aria-label="Redo edit">↷</button>
+            </div>
+            <label class="notes-label" for="clipNote">NOTES</label
+            ><textarea id="clipNote" rows="2" placeholder="a note for future you…"></textarea>
+            <div class="export-bar">
+              <span class="small muted">HAPPY WITH THE CUT?</span
+              ><button class="text-button" id="exportCurrent">export this selection ↗</button>
+            </div>
+          </section>
+          <section class="browse-panel">
+            <div class="tabs" role="tablist" aria-label="Explore episode">
+              <button role="tab" id="tabMoments" data-tab="moments" aria-selected="true">
+                moments <span id="momentCount">0</span></button
+              ><button role="tab" id="tabTranscript" data-tab="transcript" aria-selected="false">
+                transcript</button
+              ><button role="tab" id="tabShortlist" data-tab="shortlist" aria-selected="false">
+                kept <span id="keptCount">0</span>
+              </button>
+            </div>
+            <div id="momentsPane" class="browse-pane">
+              <div class="pane-tools">
+                <p class="small muted">A shortlist to listen through. Your ears make the call.</p>
+                <button class="chip" id="analyzeButton">find moments ✧</button>
+              </div>
+              <form id="semanticForm" class="search-form">
+                <input
+                  id="semanticQuery"
+                  placeholder="describe a bit you’re looking for…"
+                  aria-label="Describe a moment"
+                /><button aria-label="Find described moment">↗</button>
+              </form>
+              <div id="momentsList"></div>
+            </div>
+            <div id="transcriptPane" class="browse-pane" hidden>
+              <div class="search-form">
+                <input
+                  id="transcriptSearch"
+                  type="search"
+                  placeholder="search the words…"
+                  aria-label="Search transcript"
+                />
+              </div>
+              <div class="transcript-tools">
+                <button class="text-button" id="selectPassage">select a passage</button
+                ><button class="text-button" id="useTextSelection">clip highlighted text</button>
+              </div>
+              <p class="small muted">
+                Tap a word to listen. Double-click to correct it. Tap a speaker to rename.
+              </p>
+              <div id="chapters" class="chapters"></div>
+              <div id="transcriptList"></div>
+              <div class="pagination">
+                <button class="text-button" id="previousPage">← previous</button
+                ><span id="pageInfo" class="small muted"></span
+                ><button class="text-button" id="nextPage">next →</button>
+              </div>
+            </div>
+            <div id="shortlistPane" class="browse-pane" hidden>
+              <div class="pane-tools">
+                <p class="small muted">Saved cuts, ready when you are.</p>
+                <button class="chip" id="exportAll">export all ↗</button>
+              </div>
+              <div id="shortlist"></div>
+            </div>
+          </section>
         </div>
       </section>
-
-      <section class="card" id="aiPanel" hidden>
-        <h2>3) random clip ideas</h2>
-        <p class="hint">tap repeatedly to get different timestamps fast.</p>
-        <div class="controls-row">
-          <button id="suggestOne" class="primary">random 1</button>
-          <button id="suggestFive">random 5</button>
+      <footer class="player-dock" id="playerDock" hidden>
+        <div class="transport">
+          <button class="icon-button" id="back10" aria-label="Back 10 seconds">↶10</button
+          ><button class="play-button" id="playPause" aria-label="Play">▶</button
+          ><button class="icon-button" id="forward10" aria-label="Forward 10 seconds">10↷</button>
         </div>
-        <div id="suggestions" class="suggestions"></div>
-      </section>
+        <div class="playback-info">
+          <span id="playhead">00:00</span><span class="muted"> / </span
+          ><span id="totalDuration" class="muted">00:00</span
+          ><input
+            id="seek"
+            type="range"
+            min="0"
+            value="0"
+            step="0.1"
+            aria-label="Playback position"
+          />
+        </div>
+        <div class="dock-options">
+          <button class="text-button" id="previewClip">play clip</button
+          ><button class="text-button" id="previewStart">in ↗</button
+          ><button class="text-button" id="previewEnd">out ↗</button
+          ><button class="chip" id="loopButton" aria-pressed="false">loop</button
+          ><select id="speed" aria-label="Playback speed">
+            <option value="1">1×</option>
+            <option value="1.25">1.25×</option>
+            <option value="1.5">1.5×</option>
+            <option value="1.75">1.75×</option>
+            <option value="2">2×</option>
+          </select>
+        </div>
+        <audio id="player" preload="metadata"></audio>
+      </footer>
     </main>
-
-    <script src="app.js"></script>
+    <dialog id="connectDialog">
+      <form id="connectForm">
+        <div class="dialog-top">
+          <span class="eyebrow">YOUR PRIVATE WORKSPACE</span
+          ><button type="button" class="icon-button" data-close aria-label="Close">×</button>
+        </div>
+        <h2>Make yourself at home.</h2>
+        <p class="muted">
+          Connect the processing service for your saved episodes, AI suggestions, and exports.
+        </p>
+        <label for="backendUrl">WORKSPACE URL</label
+        ><input
+          id="backendUrl"
+          type="url"
+          placeholder="https://your-clipper.up.railway.app"
+          required
+        /><label for="workspacePassword">WORKSPACE PASSWORD</label
+        ><input id="workspacePassword" type="password" autocomplete="current-password" required />
+        <p class="small muted">
+          Use your Clipper password, not your GitHub password or an API key.
+        </p>
+        <button class="button accent wide" type="submit">connect workspace ↗</button>
+        <p id="connectError" class="error" role="alert"></p>
+        <div id="workspaceUsage"></div>
+        <div class="button-row">
+          <button type="button" class="text-button" id="disconnect">disconnect</button
+          ><a
+            class="text-button"
+            href="https://github.com/aidanmore/clipper#deploy-the-processing-service"
+            target="_blank"
+            rel="noopener"
+            >setup instructions ↗</a
+          >
+        </div>
+      </form>
+    </dialog>
+    <dialog id="importDialog">
+      <div class="dialog-top">
+        <span class="eyebrow">START SOMETHING GOOD</span
+        ><button class="icon-button" data-close aria-label="Close">×</button>
+      </div>
+      <h2>Add an episode.</h2>
+      <div class="import-methods">
+        <button class="chip" data-method="feed">Yellow Five library</button
+        ><button class="chip" data-method="url">audio link</button
+        ><button class="chip" data-method="file">upload recording</button>
+      </div>
+      <div id="feedImport">
+        <div class="search-form">
+          <input
+            id="episodeSearch"
+            type="search"
+            placeholder="find an episode…"
+            aria-label="Filter episodes"
+          />
+        </div>
+        <div id="feedEpisodes" class="feed-episodes"><p class="muted">Loading the show…</p></div>
+        <details>
+          <summary class="small muted">use a different RSS feed</summary>
+          <form id="feedForm" class="search-form">
+            <input id="feedUrl" type="url" aria-label="Podcast RSS feed URL" /><button>load</button>
+          </form>
+        </details>
+      </div>
+      <form id="urlImport" hidden>
+        <label for="audioUrl">DIRECT AUDIO URL</label
+        ><input id="audioUrl" type="url" placeholder="https://…/episode.mp3" required /><label
+          for="importTitle"
+          >EPISODE TITLE</label
+        ><input id="importTitle" placeholder="name this episode" /><button
+          class="button accent wide"
+        >
+          import episode ↗
+        </button>
+        <p class="small muted">
+          Use the audio file URL or pick an episode from the library. Spotify and YouTube page links
+          aren’t direct audio files.
+        </p>
+      </form>
+      <div id="fileImport" hidden>
+        <label class="file-drop" id="fileDrop"
+          ><span
+            >Drop your recording here.<br /><small
+              >Or tap to choose MP3, WAV, M4A, AAC, OGG, or FLAC.</small
+            ></span
+          ><input id="audioFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac"
+        /></label>
+        <p class="small muted" id="uploadProgress">Unreleased episodes are welcome.</p>
+      </div>
+      <label class="checkbox-label"
+        ><input id="autoAnalyze" type="checkbox" /> also transcribe and find moments after
+        import</label
+      >
+      <p class="small muted">
+        AI processing uses your configured provider balance. You can import and edit manually first.
+      </p>
+    </dialog>
+    <dialog id="exportDialog">
+      <div class="dialog-top">
+        <span class="eyebrow">TAKE IT WITH YOU</span
+        ><button class="icon-button" data-close aria-label="Close">×</button>
+      </div>
+      <h2>Make the export.</h2>
+      <p class="muted" id="exportSummary"></p>
+      <label for="exportFormat">FORMAT</label
+      ><select id="exportFormat">
+        <option value="mp3">MP3 · 192 kbps</option>
+        <option value="wav">WAV · uncompressed</option>
+        <option value="bundle">Bundle · MP3 + captions + transcript</option>
+        <option value="srt">SRT captions</option>
+        <option value="txt">Plain transcript</option></select
+      ><label class="checkbox-label"
+        ><input id="exportFade" type="checkbox" /> tiny fades at the cut edges</label
+      ><label class="checkbox-label"
+        ><input id="exportNormalize" type="checkbox" /> adjust loudness to −16 LUFS</label
+      >
+      <p class="small muted">
+        Original channel layout is preserved. Multiple files arrive in a ZIP.
+      </p>
+      <button class="button accent wide" id="beginExport">create export ↗</button>
+      <div id="exportJobs" aria-live="polite"></div>
+    </dialog>
+    <dialog id="optionsDialog">
+      <div class="dialog-top">
+        <span class="eyebrow">PROJECT OPTIONS</span
+        ><button class="icon-button" data-close aria-label="Close">×</button>
+      </div>
+      <h2>Keep your place.</h2>
+      <div class="options-list">
+        <button class="button" id="renameProject">rename episode</button
+        ><button class="button" id="backupProject">download project backup</button
+        ><label class="button file-button"
+          >restore a backup<input
+            id="restoreBackup"
+            type="file"
+            accept="application/json,.json" /></label
+        ><button class="button" id="recoverTranscript">recover a provider transcript</button
+        ><button class="button" id="clearExports">clear old export files</button
+        ><button class="button danger" id="deleteProject">delete project and audio</button>
+      </div>
+      <p class="small muted">
+        A project backup includes transcript and edits. Keep the original audio too; it is not
+        bundled into the backup.
+      </p>
+    </dialog>
+    <dialog id="helpDialog">
+      <div class="dialog-top">
+        <span class="eyebrow">KEEP YOUR HANDS MOVING</span
+        ><button class="icon-button" data-close aria-label="Close">×</button>
+      </div>
+      <h2>A few good shortcuts.</h2>
+      <dl class="shortcuts">
+        <dt>Space</dt>
+        <dd>Play / pause</dd>
+        <dt>← / →</dt>
+        <dd>Seek 5 seconds; Shift for 0.5 seconds</dd>
+        <dt>I / O</dt>
+        <dd>Set selection start / end</dd>
+        <dt>K</dt>
+        <dd>Keep the current clip</dd>
+        <dt>N</dt>
+        <dd>Next suggestion</dd>
+        <dt>⌘ / Ctrl Z</dt>
+        <dd>Undo; Shift to redo</dd>
+      </dl>
+      <p class="small muted">
+        In the transcript, tap “select a passage,” then its first and last words. You can also
+        highlight text and choose “clip highlighted text.”
+      </p>
+    </dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="app.js"></script>
   </body>
 </html>
