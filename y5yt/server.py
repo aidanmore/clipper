@@ -20,6 +20,7 @@ import xml.etree.ElementTree as ET
 
 FEED = "https://anchor.fm/s/1014cea94/podcast/rss"
 ITUNES = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+TRANSCRIPT_LIMIT = 5 * 1024 * 1024
 PAGE = Path(__file__).resolve().parent
 STATIC = {"/y5yt/": "index.html", "/y5yt/index.html": "index.html",
           "/y5yt/style.css": "style.css", "/y5yt/app.js": "app.js",
@@ -66,6 +67,8 @@ def episode_by_guid(guid):
             "number": item.findtext(ITUNES + "episode") or "",
             "audio": audio.get("url", "") if audio is not None else "",
             "cover": cover.get("href", "") if cover is not None else "",
+            "transcripts": [(child.get("url") or "").strip() for child in item
+                            if child.tag.rsplit("}", 1)[-1] == "transcript"],
         }
     raise ValueError("This episode is no longer in the Yellow Five feed. Refresh the archive and try again.")
 
@@ -289,8 +292,26 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(error)}, 502)
         elif path.path == "/api/video":
             self.send_video(parse_qs(path.query).get("guid", [""])[0])
+        elif path.path == "/api/transcript":
+            params = parse_qs(path.query)
+            self.send_transcript(params.get("guid", [""])[0], params.get("url", [""])[0])
         else:
             self.send_error(404)
+
+    def send_transcript(self, guid, url):
+        try:
+            if not url or url not in episode_by_guid(guid)["transcripts"]:
+                self.send_json({"error": "This transcript is not in the episode feed."}, 404)
+                return
+            with open_source(url) as response:
+                transcript = response.read(TRANSCRIPT_LIMIT + 1)
+            if len(transcript) > TRANSCRIPT_LIMIT:
+                self.send_json({"error": "The transcript exceeds 5 MB."}, 413)
+                return
+        except (OSError, ValueError, ET.ParseError) as error:
+            self.send_json({"error": str(error)}, 502)
+            return
+        self.send_bytes(transcript, "text/plain; charset=utf-8")
 
     def send_video(self, guid):
         with self.companion.lock:

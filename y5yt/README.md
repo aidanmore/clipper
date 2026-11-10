@@ -21,7 +21,13 @@ If FFmpeg is somewhere else, open PowerShell in the extracted `y5yt` folder and 
 
 To choose an output folder, pass `--output "D:\Y5YT"`. The runner also works on macOS and Linux with FFmpeg and FFprobe on PATH and `python3 y5yt/server.py` from the repo root. The renderer is reachable from the computer running it.
 
-## Generate tags from the episode audio
+## Reuse a transcript
+
+Y5YT uses a transcript automatically when the episode’s RSS entry includes a supported transcript file. Spotify-hosted shows with this feature can turn it on under **Spotify for Creators → Settings → Transcripts → Distribute transcripts across other platforms via RSS**. This publishes the transcripts in the show’s public feed. [Spotify’s transcript settings](https://support.spotify.com/us/creators/article/managing-episode-transcripts-on-spotify/)
+
+To use a file right away, select the episode in Y5YT, open **Use or review a transcript**, and choose **Import a transcript file**. You can use a VTT from Spotify for Creators or a transcript downloaded through Apple Podcasts Connect. Y5YT removes caption timing and suggests editable topic tags. [Spotify download instructions](https://support.spotify.com/us/creators/article/managing-episode-transcripts-on-spotify/) · [Apple download instructions](https://podcasters.apple.com/support/5316-transcripts-on-apple-podcasts)
+
+## Generate tags from the episode audio with Whisper
 
 Install faster-whisper once in PowerShell, using the same Python environment as the launcher.
 
