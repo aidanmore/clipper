@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Prepare full Yellow Five episodes for YouTube.">
+  <title>y5yt · yellow five</title>
+  <link rel="icon" href="../pcrp.ico" type="image/x-icon">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="masthead">
+    <a class="back" href="https://aidanmore.github.io/clipper/">← clipper</a>
+    <span class="mode" id="mode">Archive</span>
+  </header>
+  <main>
+    <div class="intro">
+      <p class="eyebrow">yellow five / youtube</p>
+      <h1>y5yt</h1>
+      <p>Pick an episode. Get the whole show ready to upload.</p>
+    </div>
+
+    <section class="card" aria-labelledby="episode-heading">
+      <h2 id="episode-heading"><span>01</span> Find an episode</h2>
+      <form id="link-form" class="row">
+        <label class="grow">Apple Podcasts episode link
+          <input id="episode-link" type="url" placeholder="https://podcasts.apple.com/…" required>
+        </label>
+        <button id="find-link" type="submit">Find episode</button>
+      </form>
+      <div class="archive">
+        <label>Search the Yellow Five archive
+          <input id="search" type="search" placeholder="Title or episode number" autocomplete="off">
+        </label>
+        <label for="episodes" class="sr-only">Choose an episode</label>
+        <select id="episodes"><option value="">Loading episodes…</option></select>
+      </div>
+      <p id="archive-status" class="hint" role="status"></p>
+    </section>
+
+    <div class="workspace" id="workspace" hidden>
+      <section class="card" aria-labelledby="render-heading">
+        <h2 id="render-heading"><span>02</span> Prepare the video</h2>
+        <div class="preview">
+          <img id="cover" width="1080" height="1080" alt="Episode cover">
+          <div>
+            <h3 id="episode-title"></h3>
+            <p id="episode-info" class="hint"></p>
+            <p class="spec">1080 × 1080 <span>·</span> H.264 / AAC <span>·</span> full episode</p>
+            <div class="sources">
+              <a id="audio-source" target="_blank" rel="noopener noreferrer">Source audio ↗</a>
+              <a id="cover-source" target="_blank" rel="noopener noreferrer">Cover art ↗</a>
+            </div>
+          </div>
+        </div>
+
+        <div id="local-controls" hidden>
+          <label id="with-transcript-label" class="check" hidden>
+            <input id="with-transcript" type="checkbox" checked>
+            Transcribe after rendering
+          </label>
+          <div class="actions">
+            <button id="render" class="primary" type="button">Render MP4</button>
+            <button id="transcribe" type="button" hidden>Transcribe only</button>
+            <a id="video-download" class="button" hidden>Download MP4</a>
+          </div>
+          <p id="output" class="hint"></p>
+          <progress id="progress" max="1" hidden></progress>
+          <p id="job-status" class="hint" role="status"></p>
+        </div>
+
+        <details id="setup">
+          <summary>Run Y5YT on your Windows PC</summary>
+          <p>Download and extract the clipper ZIP, then double-click <code>start-y5yt.cmd</code> inside <code>y5yt</code>. You need Python 3.10+ and your extracted FFmpeg build. Keep the launcher window open while a job runs.</p>
+          <p>For automatic transcript tags, run <code>py -3 -m pip install faster-whisper==1.2.1</code> once in PowerShell, then restart the launcher. Whisper downloads its model on the first use and processes audio on your PC.</p>
+          <p><a href="https://github.com/aidanmore/clipper/archive/refs/heads/main.zip">Download the clipper ZIP</a> · <a href="https://github.com/aidanmore/clipper/tree/main/y5yt">Setup instructions</a></p>
+        </details>
+      </section>
+
+      <section class="card" aria-labelledby="upload-heading">
+        <h2 id="upload-heading"><span>03</span> YouTube upload fields</h2>
+        <div class="field">
+          <div class="field-top"><label for="title">Title</label><button type="button" data-copy="title">Copy title</button></div>
+          <input id="title" type="text">
+          <small id="title-count" class="hint"></small>
+        </div>
+        <div class="field">
+          <div class="field-top"><label for="description">Description</label><button type="button" data-copy="description">Copy description</button></div>
+          <textarea id="description" rows="5"></textarea>
+          <small id="description-count" class="hint"></small>
+        </div>
+        <div class="field">
+          <div class="field-top"><label for="tags">Tags</label><button type="button" data-copy="tags">Copy tags</button></div>
+          <textarea id="tags" rows="4" aria-describedby="tag-source tags-count"></textarea>
+          <small id="tags-count" class="hint"></small>
+          <p id="tag-source" class="hint"></p>
+        </div>
+        <details id="transcript-panel">
+          <summary>Use or review a transcript</summary>
+          <label for="transcript">Episode transcript</label>
+          <textarea id="transcript" rows="7" placeholder="Paste this episode’s transcript, or generate one from the local launcher."></textarea>
+          <button id="use-transcript" type="button">Suggest tags from transcript</button>
+          <p class="hint">Review names and spellings before copying. YouTube says tags have a small role in discovery. <a href="https://support.google.com/youtube/answer/146402" target="_blank" rel="noopener noreferrer">About YouTube tags</a></p>
+        </details>
+        <p class="hint" id="copy-status" role="status"></p>
+      </section>
+    </div>
+  </main>
+  <script src="topics.js" defer></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
