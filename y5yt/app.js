@@ -4,6 +4,8 @@ const $ = (id) => document.getElementById(id);
 const feedUrl = "https://anchor.fm/s/1014cea94/podcast/rss";
 const appleUrl = "https://itunes.apple.com/lookup?id=1809708437&entity=podcastEpisode&limit=200&country=US";
 const itunes = "http://www.itunes.com/dtds/podcast-1.0.dtd";
+const transcriptTypes = new Set(["text/vtt", "application/x-subrip", "application/srt", "text/srt", "text/plain"]);
+const transcriptLimit = 5 * 1024 * 1024;
 let episodes = [];
 let current = null;
 let companion = null;
@@ -11,6 +13,9 @@ let job = null;
 let appleEpisodes = null;
 let pollTimer;
 let appliedTranscript = null;
+let transcriptRevision = 0;
+let transcriptSource = "";
+let wantWhisper = true;
 
 function message(id, text, error = false) {
   $(id).textContent = text;
@@ -54,6 +59,66 @@ function showNotes(html) {
   return [...template.content.childNodes].map(read).join("").replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, "\n\n").trim();
 }
 
+function episodeTranscript(item) {
+  const files = [...item.children].filter((child) => child.localName === "transcript").map((child) => ({
+    rawUrl: child.getAttribute("url")?.trim(),
+    url: https(child.getAttribute("url")),
+    type: (child.getAttribute("type") || "").split(";")[0].trim().toLowerCase(),
+    language: child.getAttribute("language") || "",
+  })).filter(({ url, type }) => url && transcriptTypes.has(type));
+  return files.find(({ language }) => /^en(?:-|$)/i.test(language)) ||
+    files.find(({ language }) => !language) || files[0];
+}
+
+function transcriptText(raw, type = "") {
+  const text = raw.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
+  const timing = /^\s*(?:\d+:)?\d{2}:\d{2}[.,]\d{3}\s+-->\s+(?:\d+:)?\d{2}:\d{2}[.,]\d{3}(?:\s|$)/;
+  const timed = (type && type !== "text/plain") || /^WEBVTT\b/.test(text) || text.split("\n").some((line) => timing.test(line));
+  if (!timed) return text;
+  const decoder = document.createElement("textarea");
+  let previous = "";
+  const lines = [];
+  for (const block of text.split(/\n[ \t]*\n/)) {
+    if (/^(NOTE|STYLE|REGION)(?:\s|$)/.test(block.trimStart())) continue;
+    const cue = block.split("\n");
+    const start = cue.findIndex((line) => timing.test(line));
+    if (start === -1) continue;
+    decoder.innerHTML = cue.slice(start + 1).join(" ").replace(/<[^>]+>/g, "");
+    const spoken = decoder.value.replace(/\s+/g, " ").trim();
+    if (spoken && spoken !== previous) lines.push(spoken);
+    previous = spoken;
+  }
+  return lines.join("\n");
+}
+
+function useTranscript(text, label) {
+  if (!text.trim()) throw new Error("That transcript has no readable text.");
+  transcriptSource = label;
+  $("transcript").value = text;
+  if (label !== "Local Whisper") $("with-transcript").checked = false;
+  message("transcript-status", label + " loaded.");
+  applyTags(text);
+}
+
+async function loadFeedTranscript(episode, revision) {
+  const { rawUrl, url, type } = episode.transcript;
+  const stillSelected = () => current === episode && transcriptRevision === revision && !transcriptSource;
+  try {
+    const localUrl = "/api/transcript?" + new URLSearchParams({ guid: episode.guid, url: rawUrl });
+    const response = await request(companion ? localUrl : url);
+    if (Number(response.headers.get("Content-Length")) > transcriptLimit) throw new Error("The transcript exceeds 5 MB.");
+    const raw = await response.text();
+    if (raw.length > transcriptLimit) throw new Error("The transcript exceeds 5 MB.");
+    if (stillSelected()) useTranscript(transcriptText(raw, type), "Podcast feed transcript");
+  } catch {
+    if (!stillSelected()) return;
+    $("with-transcript").checked = wantWhisper;
+    $("transcript-panel").open = true;
+    message("transcript-status", "Couldn’t load the feed transcript. Open the file above and import it here.", true);
+    message("tag-source", "The feed transcript couldn’t be loaded automatically. You can import the file below.");
+  }
+}
+
 function parseFeed(text) {
   const xml = new DOMParser().parseFromString(text, "application/xml");
   if (xml.querySelector("parsererror")) throw new Error("Yellow Five’s feed is temporarily unreadable.");
@@ -69,6 +134,7 @@ function parseFeed(text) {
       audio: https(item.querySelector("enclosure")?.getAttribute("url")),
       cover: https(tagged("image")?.getAttribute("href")),
       hostLink: https(item.querySelector("link")?.textContent),
+      transcript: episodeTranscript(item),
     };
   }).filter((episode) => episode.guid && episode.title);
 }
@@ -93,6 +159,8 @@ function selectEpisode(episode) {
   if (!episode || episode === current) return;
   current = episode;
   appliedTranscript = null;
+  transcriptRevision++;
+  transcriptSource = "";
   const url = new URL(location.href);
   url.searchParams.set("episode", current.guid);
   history.replaceState(null, "", url);
@@ -105,6 +173,10 @@ function selectEpisode(episode) {
   $("title").value = current.title;
   $("description").value = current.description;
   $("transcript").value = "";
+  $("transcript-file").value = "";
+  $("with-transcript").checked = wantWhisper && !current.transcript;
+  source("feed-transcript", current.transcript?.url);
+  message("transcript-status", "");
   const date = new Date(current.date);
   $("episode-info").textContent = [
     Number.isNaN(date.valueOf()) ? "" : date.toLocaleDateString(undefined, { dateStyle: "medium" }),
@@ -118,6 +190,10 @@ function selectEpisode(episode) {
   message("copy-status", "");
   applyTags("");
   syncJob();
+  if (current.transcript && !transcriptSource) {
+    message("tag-source", "Loading the existing transcript from the podcast feed…");
+    loadFeedTranscript(current, transcriptRevision);
+  }
 }
 
 async function resolveLink(value) {
@@ -151,7 +227,7 @@ function applyTags(transcript) {
   const hint = !transcript ? "Show and episode title tags. Add a transcript to suggest spoken topics." :
     topicCount ? topicCount + " transcript-based topic suggestions. Check the names and keep the most relevant ones." :
     "No clear recurring topics found in this transcript. You can edit the tags directly.";
-  message("tag-source", hint);
+  message("tag-source", transcript && transcriptSource ? transcriptSource + " · " + hint : hint);
   updateCounts();
 }
 
@@ -174,8 +250,9 @@ function syncJob() {
   message("job-status", status, Boolean(selected?.error));
   if (selected?.transcript && selected.transcript !== appliedTranscript) {
     appliedTranscript = selected.transcript;
-    $("transcript").value = selected.transcript;
-    applyTags(selected.transcript);
+    if (!transcriptSource || transcriptSource === "Local Whisper") {
+      useTranscript(selected.transcript, "Local Whisper");
+    }
   }
 }
 
@@ -284,8 +361,31 @@ $("link-form").addEventListener("submit", async (event) => {
   }
 });
 $("render").addEventListener("click", () => startJob(companion.whisper && $("with-transcript").checked ? "both" : "render"));
-$("transcribe").addEventListener("click", () => startJob("transcribe"));
-$("use-transcript").addEventListener("click", () => applyTags($("transcript").value.trim()));
+$("with-transcript").addEventListener("change", () => { wantWhisper = $("with-transcript").checked; });
+$("transcribe").addEventListener("click", () => {
+  transcriptSource = "";
+  transcriptRevision++;
+  startJob("transcribe");
+});
+$("transcript-file").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  const revision = ++transcriptRevision;
+  try {
+    if (file.size > transcriptLimit) throw new Error("Choose a transcript file under 5 MB.");
+    const text = transcriptText(await file.text());
+    if (revision === transcriptRevision) useTranscript(text, "Imported transcript");
+  } catch (error) {
+    if (revision === transcriptRevision) message("transcript-status", error.message, true);
+  }
+  event.target.value = "";
+});
+$("use-transcript").addEventListener("click", () => {
+  const text = transcriptText($("transcript").value);
+  if (text) useTranscript(text, transcriptSource || "Pasted transcript");
+  else applyTags("");
+});
+for (const id of ["transcript", "tags"]) $(id).addEventListener("input", () => { transcriptRevision++; });
 for (const id of ["title", "description", "tags"]) $(id).addEventListener("input", updateCounts);
 for (const button of document.querySelectorAll("[data-copy]")) {
   button.addEventListener("click", () => copyField(button.dataset.copy));

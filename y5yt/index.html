@@ -72,7 +72,7 @@
         <details id="setup">
           <summary>Run Y5YT on your Windows PC</summary>
           <p>Download and extract the clipper ZIP, then double-click <code>start-y5yt.cmd</code> inside <code>y5yt</code>. You need Python 3.10+ and your extracted FFmpeg build. Keep the launcher window open while a job runs.</p>
-          <p>For automatic transcript tags, run <code>py -3 -m pip install faster-whisper==1.2.1</code> once in PowerShell, then restart the launcher. Whisper downloads its model on the first use and processes audio on your PC.</p>
+          <p>When an episode has no transcript file, Whisper can generate one on your PC. Run <code>py -3 -m pip install faster-whisper==1.2.1</code> once in PowerShell, then restart the launcher. Whisper downloads its model on first use.</p>
           <p><a href="https://github.com/aidanmore/clipper/archive/refs/heads/main.zip">Download the clipper ZIP</a> · <a href="https://github.com/aidanmore/clipper/tree/main/y5yt">Setup instructions</a></p>
         </details>
       </section>
@@ -97,8 +97,12 @@
         </div>
         <details id="transcript-panel">
           <summary>Use or review a transcript</summary>
+          <label for="transcript-file">Import a transcript file (.vtt, .srt, .txt)</label>
+          <input id="transcript-file" type="file" accept=".vtt,.srt,.txt,text/vtt,text/plain,application/x-subrip">
+          <a id="feed-transcript" target="_blank" rel="noopener noreferrer" hidden>Open the feed’s transcript file ↗</a>
+          <p id="transcript-status" class="hint" role="status"></p>
           <label for="transcript">Episode transcript</label>
-          <textarea id="transcript" rows="7" placeholder="Paste this episode’s transcript, or generate one from the local launcher."></textarea>
+          <textarea id="transcript" rows="7" placeholder="Import or paste this episode’s transcript, or generate one from the local launcher."></textarea>
           <button id="use-transcript" type="button">Suggest tags from transcript</button>
           <p class="hint">Review names and spellings before copying. YouTube says tags have a small role in discovery. <a href="https://support.google.com/youtube/answer/146402" target="_blank" rel="noopener noreferrer">About YouTube tags</a></p>
         </details>
