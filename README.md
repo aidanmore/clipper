@@ -25,3 +25,7 @@ No server required for this version.
 ## Notes
 - Analysis is heuristic (energy + burst + density), designed for speed and practical clip discovery.
 - Processing happens in-browser; no audio is uploaded to a backend in this version.
+
+## Yellow Five uploads
+
+Open [Y5YT](https://aidanmore.github.io/clipper/y5yt/) to browse the Yellow Five archive and copy YouTube metadata. The [Y5YT setup guide](y5yt/README.md) covers local FFmpeg rendering and transcript-based tags.
