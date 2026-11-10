@@ -21,10 +21,15 @@ import xml.etree.ElementTree as ET
 FEED = "https://anchor.fm/s/1014cea94/podcast/rss"
 ITUNES = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
 TRANSCRIPT_LIMIT = 5 * 1024 * 1024
+COVER_LIMIT = 32 * 1024 * 1024
 PAGE = Path(__file__).resolve().parent
 STATIC = {"/y5yt/": "index.html", "/y5yt/index.html": "index.html",
           "/y5yt/style.css": "style.css", "/y5yt/app.js": "app.js",
-          "/y5yt/topics.js": "topics.js", "/pcrp.ico": "../pcrp.ico"}
+          "/y5yt/topics.js": "topics.js", "/pcrp.ico": "../pcrp.ico",
+          "/y5yt/thumbnail/": "thumbnail/index.html",
+          "/y5yt/thumbnail/index.html": "thumbnail/index.html",
+          "/y5yt/thumbnail/app.js": "thumbnail/app.js",
+          "/y5yt/thumbnail/thumbnail.css": "thumbnail/thumbnail.css"}
 STATIC_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
                 ".js": "text/javascript; charset=utf-8", ".ico": "image/x-icon"}
 SQUARE = ("scale=1080:1080:force_original_aspect_ratio=decrease,"
@@ -230,7 +235,7 @@ class Companion:
                     if not episode["cover"]:
                         raise ValueError("This episode has no individual cover in the feed.")
                     progress("Downloading the episode cover")
-                    download(episode["cover"], cover, 32 * 1024**2,
+                    download(episode["cover"], cover, COVER_LIMIT,
                              partial(progress, "Downloading the episode cover"))
                     slug = re.sub(r"[^a-z0-9]+", "-", episode["title"].lower()).strip("-")[:64]
                     number = re.sub(r"\D", "", episode["number"])
@@ -292,11 +297,35 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(error)}, 502)
         elif path.path == "/api/video":
             self.send_video(parse_qs(path.query).get("guid", [""])[0])
+        elif path.path == "/api/cover":
+            self.send_cover(parse_qs(path.query).get("guid", [""])[0])
         elif path.path == "/api/transcript":
             params = parse_qs(path.query)
             self.send_transcript(params.get("guid", [""])[0], params.get("url", [""])[0])
         else:
             self.send_error(404)
+
+    def send_cover(self, guid):
+        try:
+            url = episode_by_guid(guid)["cover"]
+            if not url:
+                self.send_json({"error": "The episode has no cover art."}, 404)
+                return
+            with open_source(url) as response:
+                content_type = response.headers.get_content_type()
+                if content_type not in {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/avif", "image/gif"}:
+                    raise ValueError("The podcast host did not return a supported image.")
+                cover = response.read(COVER_LIMIT + 1)
+            if len(cover) > COVER_LIMIT:
+                self.send_json({"error": "The cover exceeds 32 MB."}, 413)
+                return
+        except (OSError, ValueError, ET.ParseError) as error:
+            self.send_json({"error": str(error)}, 502)
+            return
+        try:
+            self.send_bytes(cover, content_type)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def send_transcript(self, guid, url):
         try:

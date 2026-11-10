@@ -187,6 +187,8 @@ function selectEpisode(episode) {
   else $("cover").removeAttribute("src");
   source("audio-source", current.audio);
   source("cover-source", current.cover);
+  const thumbnailTool = $("thumbnail-tool");
+  if (thumbnailTool) thumbnailTool.href = "thumbnail/?episode=" + encodeURIComponent(current.guid);
   message("copy-status", "");
   applyTags("");
   syncJob();

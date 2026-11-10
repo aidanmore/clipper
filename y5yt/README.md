@@ -6,6 +6,10 @@ Y5YT prepares full episodes of the main Yellow Five show for manual upload to Yo
 
 The [GitHub Pages version](https://aidanmore.github.io/clipper/y5yt/) can browse the archive, copy the upload fields, and suggest tags from a pasted transcript on any device.
 
+## Make an episode thumbnail
+
+Open the [thumbnail editor](https://aidanmore.github.io/clipper/y5yt/thumbnail/) and choose an episode, or use **Make thumbnail** from an episode in Y5YT. Drag the preview or use the slider to position the 16:9 crop. The halftone print screen is on by default. **Fit on black** keeps the whole cover in view. **Save JPG** exports a 3840 × 2160 image under 2 MB.
+
 ## Render on Windows
 
 1. Download the [clipper ZIP](https://github.com/aidanmore/clipper/archive/refs/heads/main.zip) and extract it. If you already have the repo locally, pull the latest changes.

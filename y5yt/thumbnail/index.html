@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Make YouTube thumbnails from Yellow Five episode art.">
+  <title>thumbnails · yellow five</title>
+  <link rel="icon" href="../../pcrp.ico" type="image/x-icon">
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="thumbnail.css">
+</head>
+<body>
+  <header class="masthead">
+    <a class="back" id="thumbnail-back" href="../">← y5yt</a>
+    <span class="mode">Thumbnail editor</span>
+  </header>
+  <main>
+    <div class="intro">
+      <p class="eyebrow">yellow five / youtube</p>
+      <h1 class="thumbnail-title">thumbnails</h1>
+      <p>Frame the episode art, add a halftone print screen, and save it for YouTube.</p>
+    </div>
+
+    <section class="card thumbnail-catalog" aria-labelledby="catalog-heading">
+      <h2 id="catalog-heading"><span>01</span> Choose an episode</h2>
+      <div class="archive">
+        <label>Search the archive
+          <input id="thumbnail-search" type="search" placeholder="Title or episode number" autocomplete="off">
+        </label>
+        <label>Episode
+          <select id="thumbnail-episodes" disabled><option value="">Loading episodes…</option></select>
+        </label>
+      </div>
+      <p id="thumbnail-catalog-status" class="hint" role="status"></p>
+    </section>
+
+    <section class="thumbnail-workspace" id="thumbnail-panel" aria-label="Edit the thumbnail" hidden>
+      <div class="card thumbnail-stage">
+        <div class="thumbnail-stage-header">
+          <h2><span>02</span> Preview</h2>
+          <p class="spec">16:9</p>
+        </div>
+        <canvas id="thumbnail-preview" width="640" height="360" role="img" aria-label="16:9 thumbnail preview"></canvas>
+        <p class="hint" id="thumbnail-drag-hint">Drag the preview up or down, or use the slider.</p>
+      </div>
+
+      <div class="card thumbnail-controls">
+        <h2><span>03</span> Frame and export</h2>
+        <fieldset class="thumbnail-modes">
+          <legend>Framing</legend>
+          <label><input type="radio" name="thumbnail-framing" value="crop" checked> Crop to fill</label>
+          <label><input type="radio" name="thumbnail-framing" value="fit"> Fit on black</label>
+        </fieldset>
+        <div id="thumbnail-position-control" hidden>
+          <label id="thumbnail-position-label" for="thumbnail-position">Vertical crop position</label>
+          <input id="thumbnail-position" type="range" min="0" max="1000" value="500">
+        </div>
+        <label class="check halftone-switch">
+          <input id="thumbnail-halftone" type="checkbox" checked>
+          Halftone print
+        </label>
+        <p class="hint">Fine ink dots follow the tones in the artwork.</p>
+        <p id="thumbnail-status" class="hint" role="status"></p>
+        <div id="thumbnail-file-control" hidden>
+          <a id="thumbnail-cover-source" target="_blank" rel="noopener noreferrer">Open original cover ↗</a>
+          <label>Use a downloaded cover
+            <input id="thumbnail-file" type="file" accept="image/*">
+          </label>
+        </div>
+        <div class="thumbnail-actions">
+          <button id="thumbnail-save" class="primary" type="button" disabled>Save JPG</button>
+          <p class="spec">3840 × 2160 · under 2 MB</p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="app.js" defer></script>
+</body>
+</html>
