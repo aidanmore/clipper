@@ -240,8 +240,10 @@ function syncJob() {
   const selected = job?.guid === current.guid ? job : null;
   $("render").disabled = active || !companion.ffmpeg || !current.audio || !current.cover;
   $("transcribe").disabled = active || !companion.ffmpeg || !current.audio;
-  $("video-download").hidden = !selected?.video;
-  if (selected?.video) {
+  const edits = Y5Censor.edits().map(({ start, end, sound }) => [start, end, sound]);
+  const videoMatches = selected?.video && JSON.stringify(selected.video_edits || []) === JSON.stringify(edits);
+  $("video-download").hidden = !videoMatches;
+  if (videoMatches) {
     $("video-download").href = "/api/video?guid=" + encodeURIComponent(current.guid);
     $("video-download").download = selected.video;
   }
@@ -364,6 +366,7 @@ $("link-form").addEventListener("submit", async (event) => {
   }
 });
 $("render").addEventListener("click", () => startJob(companion.whisper && $("with-transcript").checked ? "both" : "render"));
+document.addEventListener("y5yt-censor-edits", syncJob);
 $("with-transcript").addEventListener("change", () => { wantWhisper = $("with-transcript").checked; });
 $("transcribe").addEventListener("click", () => {
   transcriptSource = "";

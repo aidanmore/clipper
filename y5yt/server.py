@@ -310,6 +310,7 @@ class Companion:
                 self.video = None
             self.job = {"guid": guid, "state": "running", "stage": "Reading the episode feed",
                         "progress": None, "video": previous.get("video") if action == "transcribe" else None,
+                        "video_edits": previous.get("video_edits") if action == "transcribe" else None,
                         "transcript": previous.get("transcript"), "error": None}
             initial = dict(self.job)
             Thread(target=self.process, args=(guid, action, edits, sounds), daemon=True).start()
@@ -340,6 +341,7 @@ class Companion:
                     with self.lock:
                         self.video = destination
                         self.job["video"] = name
+                        self.job["video_edits"] = edits
                 if action in {"transcribe", "both"}:
                     self.update(transcript=transcribe(self.ffmpeg, audio, work, progress))
             self.update(state="done", stage="Ready", progress=1)

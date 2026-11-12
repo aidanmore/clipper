@@ -253,6 +253,7 @@ const Y5Censor = (() => {
         if (editing === edit) editing = null;
         save(editKey(), edits);
         showEdits();
+        document.dispatchEvent(new Event("y5yt-censor-edits"));
         status("Edit removed.");
       });
       actions.append(adjust, remove);
@@ -275,6 +276,7 @@ const Y5Censor = (() => {
       editing = null;
       save(editKey(), edits);
       showEdits();
+      document.dispatchEvent(new Event("y5yt-censor-edits"));
       status(changed ? "Edit updated." : "Edit added. It will be applied to the next render.");
     } catch (error) {
       status(error.message, true);
