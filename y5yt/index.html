@@ -56,6 +56,52 @@
         </div>
 
         <div id="local-controls" hidden>
+          <details id="censor-panel" hidden>
+            <summary>Censor audio <span id="censor-count" class="hint"></span></summary>
+            <audio id="censor-source" controls preload="none" aria-label="Original episode audio"></audio>
+            <div class="censor-locate">
+              <label>Timestamp
+                <input id="censor-position" inputmode="decimal" value="0:00.000" placeholder="12:34.500">
+              </label>
+              <label>Waveform zoom
+                <select id="censor-zoom">
+                  <option value="16">16 seconds</option>
+                  <option value="6" selected>6 seconds</option>
+                  <option value="2">2 seconds</option>
+                  <option value="1">1 second</option>
+                </select>
+              </label>
+            </div>
+            <div class="actions censor-actions">
+              <button id="censor-go" type="button">Go to timestamp</button>
+              <button id="censor-playhead" type="button">Zoom at playhead</button>
+            </div>
+            <div id="censor-wave-area" hidden>
+              <canvas id="censor-wave" aria-hidden="true"></canvas>
+              <div class="censor-times hint"><span id="censor-wave-start"></span><span id="censor-wave-end"></span></div>
+              <p class="hint">Drag over the word to mark it. Use the start and end fields to fine-tune.</p>
+            </div>
+            <div class="censor-locate">
+              <label>Start <input id="censor-start" inputmode="decimal" placeholder="12:34.500"></label>
+              <label>End <input id="censor-end" inputmode="decimal" placeholder="12:34.850"></label>
+            </div>
+            <label>Replacement <select id="censor-sound"></select></label>
+            <div class="actions censor-actions">
+              <button id="censor-original" type="button">Hear original</button>
+              <button id="censor-preview" type="button">Hear replacement</button>
+              <button id="censor-add" type="button">Add edit</button>
+            </div>
+            <audio id="censor-audition" controls hidden aria-label="Censor edit preview"></audio>
+            <p id="censor-status" class="hint" role="status"></p>
+            <ul id="censor-edits" class="censor-edits" aria-label="Censor edits"></ul>
+            <details>
+              <summary>Load replacement sounds</summary>
+              <p class="hint">Use short audio clips for effects or recorded words. Longer sounds are trimmed to fit the selection.</p>
+              <label>Sound slot <select id="censor-slot"></select></label>
+              <label>Audio file <input id="censor-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.aiff,.webm"></label>
+              <p id="censor-sound-status" class="hint" role="status"></p>
+            </details>
+          </details>
           <label id="with-transcript-label" class="check" hidden>
             <input id="with-transcript" type="checkbox" checked>
             Transcribe after rendering
@@ -112,6 +158,7 @@
     </div>
   </main>
   <script src="topics.js" defer></script>
+  <script src="censor.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>

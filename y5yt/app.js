@@ -187,6 +187,7 @@ function selectEpisode(episode) {
   else $("cover").removeAttribute("src");
   source("audio-source", current.audio);
   source("cover-source", current.cover);
+  Y5Censor.select(current, companion);
   const thumbnailTool = $("thumbnail-tool");
   if (thumbnailTool) thumbnailTool.href = "thumbnail/?episode=" + encodeURIComponent(current.guid);
   message("copy-status", "");
@@ -279,7 +280,7 @@ async function startJob(action) {
     job = await (await request("/api/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Y5YT": "1" },
-      body: JSON.stringify({ guid: current.guid, action }),
+      body: JSON.stringify({ guid: current.guid, action, edits: action === "transcribe" ? [] : Y5Censor.edits() }),
     })).json();
     syncJob();
     refreshJob();

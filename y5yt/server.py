@@ -2,6 +2,7 @@
 
 import argparse
 from functools import partial
+from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import json
@@ -12,19 +13,25 @@ import shutil
 import subprocess
 import tempfile
 from threading import Lock, Thread
+from time import monotonic
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
 import webbrowser
 import xml.etree.ElementTree as ET
+
+from censor import RATE, SLOT_IDS, apply_edits, edits_from_request, get_sounds
 
 
 FEED = "https://anchor.fm/s/1014cea94/podcast/rss"
 ITUNES = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
 TRANSCRIPT_LIMIT = 5 * 1024 * 1024
 COVER_LIMIT = 32 * 1024 * 1024
+AUDIO_LIMIT = 1024**3
+SOUND_LIMIT = 8 * 1024 * 1024
 PAGE = Path(__file__).resolve().parent
 STATIC = {"/y5yt/": "index.html", "/y5yt/index.html": "index.html",
           "/y5yt/style.css": "style.css", "/y5yt/app.js": "app.js",
+          "/y5yt/censor.js": "censor.js",
           "/y5yt/topics.js": "topics.js", "/pcrp.ico": "../pcrp.ico",
           "/y5yt/thumbnail/": "thumbnail/index.html",
           "/y5yt/thumbnail/index.html": "thumbnail/index.html",
@@ -34,6 +41,8 @@ STATIC_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=
                 ".js": "text/javascript; charset=utf-8", ".ico": "image/x-icon"}
 SQUARE = ("scale=1080:1080:force_original_aspect_ratio=decrease,"
           "pad=1080:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p")
+feed_lock = Lock()
+cached_feed = (0, b"")
 
 
 def find_tools(explicit):
@@ -56,8 +65,20 @@ def open_source(url, timeout=30):
 
 
 def feed_xml():
-    with open_source(FEED) as response:
-        return response.read(4 * 1024 * 1024)
+    global cached_feed
+    with feed_lock:
+        expires, body = cached_feed
+        if monotonic() >= expires:
+            with open_source(FEED) as response:
+                body = response.read(4 * 1024 * 1024)
+            cached_feed = (monotonic() + 60, body)
+        return body
+
+
+def episode_guid(guid):
+    if not isinstance(guid, str) or not re.fullmatch(r"[\w.-]{1,128}", guid):
+        raise ValueError("Invalid episode identifier.")
+    return guid
 
 
 def episode_by_guid(guid):
@@ -111,27 +132,56 @@ def ffmpeg_run(executable, args, error_log, report=None):
                 raise RuntimeError(details[-1] if details else "FFmpeg could not finish the export.")
 
 
-def audio_duration(ffprobe, path):
+def audio_info(ffprobe, path):
     result = subprocess.run(
         [ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries",
-         "stream=duration:format=duration", "-of", "json", str(path)],
+         "stream=duration,channels:format=duration", "-of", "json", str(path)],
         capture_output=True, check=True, text=True, timeout=30,
     )
     data = json.loads(result.stdout)
     if not data.get("streams"):
         raise ValueError("FFprobe found no audio stream.")
-    duration = data["streams"][0].get("duration")
-    return float(duration if duration not in (None, "N/A") else data["format"]["duration"])
+    stream = data["streams"][0]
+    duration = stream.get("duration")
+    return float(duration if duration not in (None, "N/A") else data["format"]["duration"]), stream["channels"]
 
 
-def render(ffmpeg, ffprobe, audio, cover, work, destination, update):
+def audio_duration(ffprobe, path):
+    return audio_info(ffprobe, path)[0]
+
+
+def decode_pcm(ffmpeg, source, output, log, window=None, report=None):
+    filters = f"aresample={RATE}"
+    if window:
+        start, end = window
+        # Trim after decoding and resampling so preview and render share sample boundaries.
+        first, last = (time * (RATE // 1000) for time in (start, end))
+        filters += f",atrim=start_sample={first}:end_sample={last},asetpts=PTS-STARTPTS"
+    ffmpeg_run(ffmpeg, ["-i", source, "-map", "0:a:0", "-af", filters, "-f", "f32le", output], log, report)
+
+
+def pcm_input(path, channels):
+    return ["-f", "f32le", "-ar", str(RATE), "-ac", str(channels), "-i", path]
+
+
+def render(ffmpeg, ffprobe, audio, cover, work, destination, update, edits=(), sounds=None):
     log = work / "ffmpeg.log"
-    update("Encoding the original episode audio", 0)
-    source_duration = audio_duration(ffprobe, audio)
+    source_duration, channels = audio_info(ffprobe, audio)
+    audio_input = ["-i", audio]
+    stage = "Encoding the original episode audio"
+    if edits:
+        pcm = work / "episode.pcm"
+        update("Preparing audio for censor edits", 0)
+        decode_pcm(ffmpeg, audio, pcm, log, report=lambda time:
+                   update("Preparing audio for censor edits", time / source_duration))
+        apply_edits(pcm, channels, edits, sounds)
+        audio_input = pcm_input(pcm, channels)
+        stage = "Encoding the censored episode audio"
+    update(stage, 0)
     encoded_audio = work / "episode.m4a"
-    ffmpeg_run(ffmpeg, ["-i", audio, "-map", "0:a:0", "-map_metadata", "-1",
+    ffmpeg_run(ffmpeg, [*audio_input, "-map", "0:a:0", "-map_metadata", "-1",
                         "-c:a", "aac", "-b:a", "256k", "-ar", "48000", encoded_audio],
-               log, lambda time: update("Encoding the original episode audio", time / source_duration))
+               log, lambda time: update(stage, time / source_duration))
     duration = audio_duration(ffprobe, encoded_audio)
 
     update("Preparing the 1080 × 1080 cover", None)
@@ -184,9 +234,12 @@ def transcribe(ffmpeg, audio, work, update):
 
 
 class Companion:
-    def __init__(self, ffmpeg, ffprobe, output):
+    def __init__(self, ffmpeg, ffprobe, output, cache):
         self.ffmpeg, self.ffprobe = ffmpeg, ffprobe
         self.output = output
+        self.cache = cache
+        self.sound_directory = output / ".censor-sounds"
+        self.audio_lock = Lock()
         self.whisper = importlib.util.find_spec("faster_whisper") is not None
         self.lock = Lock()
         self.job = None
@@ -200,25 +253,69 @@ class Companion:
         with self.lock:
             self.job.update(fields)
 
-    def start(self, guid, action):
+    def cached_audio(self, url, update=lambda _: None):
+        if not url:
+            raise ValueError("This episode has no audio in the feed.")
+        key = sha256(url.encode()).hexdigest()
+        audio = self.cache / (key + ".mp3")
+        with self.audio_lock:
+            if not audio.is_file():
+                partial_audio = audio.with_suffix(".part")
+                try:
+                    download(url, partial_audio, AUDIO_LIMIT, update)
+                    partial_audio.replace(audio)
+                finally:
+                    partial_audio.unlink(missing_ok=True)
+        return audio
+
+    def save_sound(self, slot, body):
+        self.sound_directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=self.sound_directory) as temp:
+            work = Path(temp)
+            source, sound = work / "source", work / "sound.pcm"
+            source.write_bytes(body)
+            ffmpeg_run(self.ffmpeg, ["-protocol_whitelist", "file", "-format_whitelist",
+                                    "aac,aiff,flac,matroska,webm,mov,mp3,ogg,wav", "-i", source,
+                                    "-map", "0:a:0", "-t", "5", "-ac", "1", "-ar", str(RATE),
+                                    "-f", "f32le", sound], work / "ffmpeg.log")
+            if not sound.stat().st_size:
+                raise ValueError("That file does not contain playable audio.")
+            sound.replace(self.sound_directory / (slot + ".pcm"))
+
+    def preview(self, guid, window, edits):
+        sounds = get_sounds(edits, self.sound_directory)
+        audio = self.cached_audio(episode_by_guid(guid)["audio"])
+        duration, channels = audio_info(self.ffprobe, audio)
+        if window[0] >= duration * 1000:
+            raise ValueError("That timestamp is past the end of the episode.")
+        with tempfile.TemporaryDirectory(prefix="y5yt-preview-") as temp:
+            work = Path(temp)
+            pcm, wav, log = work / "clip.pcm", work / "clip.wav", work / "ffmpeg.log"
+            decode_pcm(self.ffmpeg, audio, pcm, log, window)
+            apply_edits(pcm, channels, edits, sounds, offset=window[0])
+            ffmpeg_run(self.ffmpeg, [*pcm_input(pcm, channels), "-c:a", "pcm_s16le", wav], log)
+            return wav.read_bytes()
+
+    def start(self, guid, action, edits):
         if not self.ffmpeg:
             raise ValueError("FFmpeg and FFprobe were not found. Restart with --ffmpeg pointing to ffmpeg.exe.")
         if action in {"transcribe", "both"} and not self.whisper:
             raise ValueError("Install faster-whisper, then restart Y5YT to transcribe automatically.")
+        sounds = get_sounds(edits, self.sound_directory)
         with self.lock:
             if self.job and self.job["state"] == "running":
                 raise ValueError("An episode is already being processed.")
             previous = self.job if self.job and self.job["guid"] == guid else {}
-            if not previous:
+            if not previous or action != "transcribe":
                 self.video = None
             self.job = {"guid": guid, "state": "running", "stage": "Reading the episode feed",
-                        "progress": None, "video": previous.get("video"),
+                        "progress": None, "video": previous.get("video") if action == "transcribe" else None,
                         "transcript": previous.get("transcript"), "error": None}
             initial = dict(self.job)
-            Thread(target=self.process, args=(guid, action), daemon=True).start()
+            Thread(target=self.process, args=(guid, action, edits, sounds), daemon=True).start()
             return initial
 
-    def process(self, guid, action):
+    def process(self, guid, action, edits, sounds):
         def progress(stage, percent=None):
             self.update(stage=stage, progress=None if percent is None else min(1, max(0, percent)))
 
@@ -226,11 +323,9 @@ class Companion:
             episode = episode_by_guid(guid)
             with tempfile.TemporaryDirectory(prefix="y5yt-") as temp:
                 work = Path(temp)
-                audio = work / "source.mp3"
                 cover = work / "cover.image"
                 progress("Downloading the full episode audio")
-                download(episode["audio"], audio, 1024**3,
-                         partial(progress, "Downloading the full episode audio"))
+                audio = self.cached_audio(episode["audio"], partial(progress, "Downloading the full episode audio"))
                 if action in {"render", "both"}:
                     if not episode["cover"]:
                         raise ValueError("This episode has no individual cover in the feed.")
@@ -239,9 +334,9 @@ class Companion:
                              partial(progress, "Downloading the episode cover"))
                     slug = re.sub(r"[^a-z0-9]+", "-", episode["title"].lower()).strip("-")[:64]
                     number = re.sub(r"\D", "", episode["number"])
-                    name = "-".join(filter(None, ("yellow-five", number, slug))) + ".mp4"
+                    name = "-".join(filter(None, ("yellow-five", number, slug, "censored" if edits else ""))) + ".mp4"
                     destination = self.output / name
-                    render(self.ffmpeg, self.ffprobe, audio, cover, work, destination, progress)
+                    render(self.ffmpeg, self.ffprobe, audio, cover, work, destination, progress, edits, sounds)
                     with self.lock:
                         self.video = destination
                         self.job["video"] = name
@@ -289,7 +384,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_bytes(file.read_bytes(), STATIC_TYPES[file.suffix])
         elif path.path == "/api/status":
             self.send_json({"ffmpeg": bool(self.companion.ffmpeg), "whisper": self.companion.whisper,
-                            "output": str(self.companion.output), "job": self.companion.snapshot()})
+                            "output": str(self.companion.output), "job": self.companion.snapshot(),
+                            "sounds": [slot for slot in SLOT_IDS if
+                                       (self.companion.sound_directory / (slot + ".pcm")).is_file()]})
         elif path.path == "/api/feed":
             try:
                 self.send_bytes(feed_xml(), "application/rss+xml; charset=utf-8")
@@ -297,6 +394,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(error)}, 502)
         elif path.path == "/api/video":
             self.send_video(parse_qs(path.query).get("guid", [""])[0])
+        elif path.path == "/api/audio":
+            self.send_audio(parse_qs(path.query).get("guid", [""])[0])
         elif path.path == "/api/cover":
             self.send_cover(parse_qs(path.query).get("guid", [""])[0])
         elif path.path == "/api/transcript":
@@ -304,6 +403,47 @@ class Handler(BaseHTTPRequestHandler):
             self.send_transcript(params.get("guid", [""])[0], params.get("url", [""])[0])
         else:
             self.send_error(404)
+
+    def send_audio(self, guid):
+        try:
+            audio = self.companion.cached_audio(episode_by_guid(episode_guid(guid))["audio"])
+        except (ValueError, OSError, ET.ParseError) as error:
+            self.send_json({"error": str(error)}, 502)
+            return
+        with audio.open("rb") as file:
+            size = os.fstat(file.fileno()).st_size
+            start, end = 0, size - 1
+            requested = self.headers.get("Range")
+            if requested:
+                match = re.fullmatch(r"bytes=(\d{0,12})-(\d{0,12})", requested)
+                if match and match[1]:
+                    start = int(match[1])
+                    end = min(end, int(match[2])) if match[2] else end
+                elif match and match[2]:
+                    start = max(0, size - int(match[2]))
+                else:
+                    start = size
+                if start > end:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.end_headers()
+                    return
+            self.send_response(206 if requested else 200)
+            self.send_header("Content-Type", "audio/mpeg")
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.send_header("Cache-Control", "no-store")
+            if requested:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.end_headers()
+            file.seek(start)
+            try:
+                while start <= end:
+                    chunk = file.read(min(256 * 1024, end - start + 1))
+                    self.wfile.write(chunk)
+                    start += len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     def send_cover(self, guid):
         try:
@@ -363,21 +503,43 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.valid_host():
             return
-        if self.path != "/api/jobs" or self.headers.get("X-Y5YT") != "1":
+        path = urlsplit(self.path)
+        if self.headers.get("X-Y5YT") != "1" or path.path not in {
+                "/api/jobs", "/api/censor-preview", "/api/censor-sound"}:
             self.send_error(403)
             return
         try:
             length = int(self.headers.get("Content-Length", 0))
-            if not 0 < length <= 1024:
-                raise ValueError("Invalid job request.")
-            request = json.loads(self.rfile.read(length))
-            guid, action = request.get("guid"), request.get("action")
-            if not isinstance(guid, str) or not re.fullmatch(r"[\w.-]{1,128}", guid):
-                raise ValueError("Invalid episode identifier.")
+            if path.path == "/api/censor-sound":
+                slot = parse_qs(path.query).get("slot", [""])[0]
+                if not 0 < length <= SOUND_LIMIT or slot not in SLOT_IDS:
+                    raise ValueError("Choose a valid sound slot and an audio file under 8 MB.")
+                if not self.companion.ffmpeg:
+                    raise ValueError("FFmpeg was not found.")
+                self.companion.save_sound(slot, self.rfile.read(length))
+                self.send_json({"slot": slot})
+                return
+            if not 0 < length <= 64 * 1024:
+                raise ValueError("Invalid request size.")
+            payload = json.loads(self.rfile.read(length))
+            guid = episode_guid(payload.get("guid"))
+            edits = edits_from_request(payload.get("edits", []))
+            if path.path == "/api/censor-preview":
+                start, end = payload.get("start"), payload.get("end")
+                if (type(start) is not int or type(end) is not int or not 0 <= start < end
+                        or end - start > 20_000 or any(a < start or b > end for a, b, _ in edits)):
+                    raise ValueError("Choose a preview window of up to 20 seconds around the edit.")
+                if not self.companion.ffmpeg:
+                    raise ValueError("FFmpeg was not found.")
+                self.send_bytes(self.companion.preview(guid, (start, end), edits), "audio/wav")
+                return
+            action = payload.get("action")
             if action not in ("render", "transcribe", "both"):
                 raise ValueError("Invalid job action.")
-            self.send_json(self.companion.start(guid, action), 202)
-        except (ValueError, AttributeError) as error:
+            self.send_json(self.companion.start(guid, action, edits if action != "transcribe" else []), 202)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except (ValueError, AttributeError, RuntimeError, OSError, ET.ParseError, subprocess.SubprocessError) as error:
             self.send_json({"error": str(error)}, 400)
 
     def log_message(self, *_):
@@ -391,16 +553,17 @@ def main():
     parser.add_argument("--port", type=int, default=8755)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
-    companion = Companion(*find_tools(args.ffmpeg), args.output.expanduser().resolve())
-    with ThreadingHTTPServer(("127.0.0.1", args.port), partial(Handler, companion=companion)) as server:
-        url = f"http://127.0.0.1:{server.server_port}/y5yt/"
-        print(f"Y5YT is running at {url}. Keep this window open while a job runs.", flush=True)
-        if not args.no_browser:
-            webbrowser.open(url)
-        try:
-            server.serve_forever()
-        except KeyboardInterrupt:
-            pass
+    with tempfile.TemporaryDirectory(prefix="y5yt-audio-") as cache:
+        companion = Companion(*find_tools(args.ffmpeg), args.output.expanduser().resolve(), Path(cache))
+        with ThreadingHTTPServer(("127.0.0.1", args.port), partial(Handler, companion=companion)) as server:
+            url = f"http://127.0.0.1:{server.server_port}/y5yt/"
+            print(f"Y5YT is running at {url}. Keep this window open while a job runs.", flush=True)
+            if not args.no_browser:
+                webbrowser.open(url)
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
 
 
 if __name__ == "__main__":

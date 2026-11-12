@@ -25,6 +25,15 @@ If FFmpeg is somewhere else, open PowerShell in the extracted `y5yt` folder and 
 
 To choose an output folder, pass `--output "D:\Y5YT"`. The runner also works on macOS and Linux with FFmpeg and FFprobe on PATH and `python3 y5yt/server.py` from the repo root. The renderer is reachable from the computer running it.
 
+## Censor a word in the video
+
+1. Select an episode in the local renderer and open **Censor audio**. Enter a timestamp such as `12:34.500`, or scrub the audio player and click **Zoom at playhead**.
+2. Zoom the waveform, then drag over the word. Fine-tune the **Start** and **End** fields and compare **Hear original** with **Hear replacement**.
+3. Use the built-in bleep, or load a short effect or recorded word into one of the three reusable sound slots. A sound longer than the selection is trimmed. Shorter sounds leave silence for the rest of the selection.
+4. Click **Add edit** for each word, then **Render censored MP4**. Edits are saved per episode in your browser. The export keeps the full episode timing and has `-censored` in the filename.
+
+The censor editor runs through the local FFmpeg launcher and works without Whisper.
+
 ## Reuse a transcript
 
 Y5YT uses a transcript automatically when the episode’s RSS entry includes a supported transcript file. Spotify-hosted shows with this feature can turn it on under **Spotify for Creators → Settings → Transcripts → Distribute transcripts across other platforms via RSS**. This publishes the transcripts in the show’s public feed. [Spotify’s transcript settings](https://support.spotify.com/us/creators/article/managing-episode-transcripts-on-spotify/)
