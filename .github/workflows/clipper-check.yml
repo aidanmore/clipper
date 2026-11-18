@@ -4,6 +4,9 @@ on:
     branches: [main, direct-clip-downloads]
     paths: ['app.js', 'direct-export.js', 'encode-worker.js', 'vendor/**', 'tests/**', '.github/workflows/clipper-check.yml']
   workflow_dispatch:
+concurrency:
+  group: clipper-browser-verify-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -28,4 +31,4 @@ jobs:
           node --test tests/core.test.cjs
           python -m unittest discover -s tests -p 'test_*.py'
       - name: Verify real MP3 and WAV downloads in Chromium and WebKit
-        run: python -u tests/browser_export.py
+        run: timeout 240 python -u tests/browser_export.py

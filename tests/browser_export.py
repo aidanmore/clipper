@@ -20,7 +20,7 @@ from prepare_audio import seek_table
 
 def run():
     signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError("Browser export checks timed out")))
-    signal.alarm(120)
+    signal.alarm(180)
     with tempfile.TemporaryDirectory() as tmp:
         temp = Path(tmp)
         sources = {}
@@ -97,6 +97,17 @@ def run():
                         event.value.save_as(output)
                         assert output.stat().st_size > 10000
                         page.get_by_role("link", name="Save test clip").evaluate("e=>e.remove()")
+                    page.unroute("https://raw.githubusercontent.com/aidanmore/clipper/clipper-audio-*/**")
+                    episode = json.loads((ROOT / "data/catalog.json").read_text())["episodes"][0]
+                    real = page.evaluate("""async (episode) => {
+                        const cut=await DirectExport.clip(episode,{start:1.25,end:3.5},{format:'mp3',signal:AbortSignal.timeout(30000)});
+                        const ctx=new AudioContext(),audio=await ctx.decodeAudioData(await cut.blob.arrayBuffer());
+                        let energy=0;for(const x of audio.getChannelData(0))energy+=x*x;
+                        await ctx.close();
+                        return {duration:audio.duration,channels:audio.numberOfChannels,rms:Math.sqrt(energy/audio.length),bytes:cut.blob.size};
+                    }""", episode)
+                    print(browser_type.name, "LIVE CORS AND EXPORT", json.dumps(real), flush=True)
+                    assert abs(real["duration"]-2.25)<.12 and real["channels"]==2 and real["rms"]>.001,real
                     browser.close()
         finally:
             server.shutdown()
