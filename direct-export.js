@@ -2,6 +2,7 @@
 // Source objects contain the original MP3 bytes. Decoding happens in small windows
 // and encoding in a worker, keeping hour-long episodes practical on a phone.
 window.DirectExport = (() => {
+  const scriptRoot = new URL('.', document.currentScript.src);
   const manifests = new Map(), cache = new Map();
   const root = 'https://raw.githubusercontent.com/aidanmore/clipper/';
   function base(episode) {
@@ -61,7 +62,7 @@ window.DirectExport = (() => {
     return {buffer, time: section.time};
   }
   function encodeWorker(signal) {
-    const worker = new Worker('encode-worker.js?v=3');
+    const worker = new Worker(new URL('encode-worker.js?v=3', scriptRoot));
     let pending;
     worker.onmessage = ({data}) => {
       if (!pending) return;
