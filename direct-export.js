@@ -63,21 +63,21 @@ window.DirectExport = (() => {
   }
   function encodeWorker(signal) {
     const worker = new Worker(new URL('encode-worker.js?v=3', scriptRoot));
-    let pending;
+    let pending, timer;
     worker.onmessage = ({data}) => {
       if (!pending) return;
-      const current = pending; pending = null;
+      clearTimeout(timer); const current = pending; pending = null;
       if (data.type === 'error') current.reject(new Error(data.message)); else current.resolve(data);
     };
-    worker.onerror = () => { pending?.reject(new Error('The audio encoder couldn’t start. Refresh the page and try again.')); pending = null; };
-    const stop = () => { worker.terminate(); pending?.reject(new DOMException('Cancelled', 'AbortError')); pending = null; };
+    worker.onerror = () => { clearTimeout(timer); pending?.reject(new Error('The audio encoder couldn’t start. Refresh the page and try again.')); pending = null; };
+    const stop = () => { clearTimeout(timer); worker.terminate(); pending?.reject(new DOMException('Cancelled', 'AbortError')); pending = null; };
     signal.addEventListener('abort', stop, {once: true});
     return {
       send(data, transfer = []) {
         signal.throwIfAborted();
-        return new Promise((resolve, reject) => { pending = {resolve, reject}; worker.postMessage(data, transfer); });
+        return new Promise((resolve, reject) => { pending = {resolve, reject}; timer = setTimeout(() => { pending = null; worker.terminate(); reject(new Error('The encoder took too long. Try a shorter clip.')); }, 60000); worker.postMessage(data, transfer); });
       },
-      close() { signal.removeEventListener('abort', stop); worker.terminate(); }
+      close() { clearTimeout(timer); signal.removeEventListener('abort', stop); worker.terminate(); }
     };
   }
   async function clip(episode, selection, {format = 'mp3', signal, progress = () => {}, localBuffer = null} = {}) {

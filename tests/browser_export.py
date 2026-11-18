@@ -4,6 +4,7 @@ import contextlib
 import functools
 import http.server
 import json
+import signal
 from pathlib import Path
 import subprocess
 import sys
@@ -18,6 +19,8 @@ from prepare_audio import seek_table
 
 
 def run():
+    signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError("Browser export checks timed out")))
+    signal.alarm(120)
     with tempfile.TemporaryDirectory() as tmp:
         temp = Path(tmp)
         sources = {}
@@ -38,8 +41,11 @@ def run():
         try:
             with sync_playwright() as p:
                 for browser_type in (p.chromium, p.webkit):
+                    print("Starting", browser_type.name, flush=True)
                     browser = browser_type.launch(headless=True)
                     page = browser.new_page()
+                    page.on("console", lambda message: print("Browser:", message.text, flush=True))
+                    page.on("pageerror", lambda error: print("Page error:", error, flush=True))
                     page.goto(f"http://127.0.0.1:{server.server_port}/tests/export-harness.html")
                     def audio(route):
                         url = route.request.url
@@ -60,7 +66,8 @@ def run():
                             const episode = {key:'80000000000000000000', fingerprint:which};
                             const results = [];
                             for (const [start,end] of [[0,1.25],[1.25,3.5],[5.13,8.87],[19.77,42.12]]) {
-                                const cut = await DirectExport.clip(episode,{start,end},{format:'wav'});
+                                console.log('Cutting',which,start,end);
+                                const cut = await DirectExport.clip(episode,{start,end},{format:'wav',signal:AbortSignal.timeout(20000)});
                                 const buffer = await ctx.decodeAudioData(await cut.blob.arrayBuffer());
                                 const first=Math.round(start*44100), count=Math.round(end*44100)-first;
                                 let err=0, energy=0, stereo=0;
@@ -71,7 +78,7 @@ def run():
                                 }
                                 results.push({start,end,length:buffer.length,expected:count,channels:buffer.numberOfChannels,error:Math.sqrt(err/(count*2)),rms:Math.sqrt(energy/(count*2)),stereo:stereo/count});
                             }
-                            const mp3=await DirectExport.clip(episode,{start:1.25,end:3.5},{format:'mp3'});
+                            const mp3=await DirectExport.clip(episode,{start:1.25,end:3.5},{format:'mp3',signal:AbortSignal.timeout(20000)});
                             const decoded=await ctx.decodeAudioData(await mp3.blob.arrayBuffer());
                             const link=document.createElement('a');link.download='verified-clip.mp3';link.href=URL.createObjectURL(mp3.blob);link.textContent='Save test clip';document.body.append(link);
                             await ctx.close();
