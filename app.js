@@ -24,8 +24,16 @@ function element(tag, className, text) {
   if (text !== undefined) node.textContent = text;
   return node;
 }
-function button(text, action, className = '') {
+function icon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'ui-icon'); svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', '#icon-' + name); svg.append(use); return svg;
+}
+function button(text, action, className = '', iconName = null) {
   const node = element('button', className, text);
+  if (iconName) node.prepend(icon(iconName));
   node.type = 'button'; node.addEventListener('click', action); return node;
 }
 function status(text, error = false) {
@@ -93,7 +101,7 @@ async function archive() {
     const last = state.episodes.find(e => e.guid === saved.last);
     $('resume').hidden = !last;
     if (last) {
-      $('resume').textContent = '↳ Resume ' + last.title + ' · ' + C.time(saved.episodes[last.guid]?.position || 0);
+      $('resume').textContent = 'Resume ' + last.title + ' · ' + C.time(saved.episodes[last.guid]?.position || 0);
       $('resume').onclick = () => openEpisode(last);
     }
   } catch { $('archiveStatus').textContent = 'Couldn’t load the archive. Tap Refresh to retry, or open your own audio.'; }
@@ -181,7 +189,7 @@ function applyDuration() {
 function updateSelection(save = true) {
   $('startTime').value = C.time(state.start,true); $('endTime').value = C.time(state.end,true);
   $('clipLength').textContent = (state.end-state.start).toFixed(1) + 's';
-  $('saveClip').textContent = state.editing ? '✓ Update clip' : '+ Save clip';
+  $('saveClip').textContent = state.editing ? 'Update clip' : '+ Save clip';
   $('cancelEdit').hidden = !state.editing;
   if (save) { state.preview = null; remember(); }
   draw();
@@ -252,18 +260,18 @@ function baseWave(canvas,start,span) {
   let cache=waveCaches.get(canvas.id);
   if(!cache||cache.key!==key){
     const image=document.createElement('canvas');image.width=canvas.width;image.height=canvas.height;
-    const ctx=image.getContext('2d');ctx.scale(ratio,ratio);ctx.fillStyle='#13160f';ctx.fillRect(0,0,width,height);
+    const ctx=image.getContext('2d');ctx.scale(ratio,ratio);ctx.fillStyle='#17160f';ctx.fillRect(0,0,width,height);
     if(state.analysis){
       const a=state.analysis,step=a.peakStep;
-      ctx.fillStyle='#7f896f';
+      ctx.fillStyle='#948c71';
       for(let x=0;x<width;x+=2){
         const first=Math.floor((start+x/width*span)/step),last=Math.min(a.peaks.length,Math.max(first+1,Math.floor((start+(x+2)/width*span)/step)));
         let max=0;for(let j=first;j<last;j++)max=Math.max(max,a.peaks[j]||0);
         const h=Math.max(1,(max/255)**.7*(height-18));ctx.fillRect(x,(height-h)/2,1.3,h);
       }
     }else{
-      ctx.strokeStyle='#2b3323';ctx.beginPath();ctx.moveTo(0,height/2);ctx.lineTo(width,height/2);ctx.stroke();
-      ctx.fillStyle='#7d8770';ctx.font='11px Arial';ctx.fillText('Seek and mark while the waveform prepares',12,height/2-12);
+      ctx.strokeStyle='#373222';ctx.beginPath();ctx.moveTo(0,height/2);ctx.lineTo(width,height/2);ctx.stroke();
+      ctx.fillStyle='#8c846e';ctx.font='11px Arial';ctx.fillText('Seek and mark while the waveform prepares',12,height/2-12);
     }
     const interval=span>600?600:span>120?60:span>30?10:span>10?5:1;
     ctx.strokeStyle='#ffffff0c';for(let t=Math.ceil(start/interval)*interval;t<start+span;t+=interval){const x=(t-start)/span*width;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,height);ctx.stroke()}
@@ -271,8 +279,8 @@ function baseWave(canvas,start,span) {
   }
   const ctx=canvas.getContext('2d');ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(cache.image,0,0);ctx.scale(ratio,ratio);
   const left=(state.start-start)/span*width,right=(state.end-start)/span*width;
-  ctx.fillStyle='#d8ef9428';ctx.fillRect(Math.max(0,left),0,Math.max(0,Math.min(width,right)-Math.max(0,left)),height);
-  ctx.strokeStyle='#d8ef94';ctx.lineWidth=1;ctx.strokeRect(left+.5,.5,right-left,height-1);
+  ctx.fillStyle='#ffe04b28';ctx.fillRect(Math.max(0,left),0,Math.max(0,Math.min(width,right)-Math.max(0,left)),height);
+  ctx.strokeStyle='#ffe04b';ctx.lineWidth=1;ctx.strokeRect(left+.5,.5,right-left,height-1);
   const now=(player.currentTime-start)/span*width;if(now>=0&&now<=width){ctx.strokeStyle='#f5f5ed';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(now,0);ctx.lineTo(now,height);ctx.stroke()}
   return width;
 }
@@ -312,9 +320,9 @@ function renderTray() {
   const clips=currentDraft()?.clips||[];
   $('savedCount').textContent=clips.length+' CLIP'+(clips.length===1?'':'S');$('exportAll').disabled=!clips.length;
   $('clipTray').replaceChildren(...(clips.length?clips.map(clip=>{
-    const row=element('div','saved-clip');row.append(element('strong','',clip.name),element('p','',C.time(clip.start,true)+' → '+C.time(clip.end,true)+' / '+(clip.end-clip.start).toFixed(1)+'s'));
+    const row=element('div','saved-clip');row.append(element('strong','',clip.name),element('p','',C.time(clip.start,true)+' to '+C.time(clip.end,true)+' / '+(clip.end-clip.start).toFixed(1)+'s'));
     const actions=element('div','clip-actions');
-    actions.append(button('▷ Hear',()=>{setSelection(clip.start,clip.end,true);preview()}),button('Edit',()=>{state.editing=clip.id;$('clipName').value=clip.name;setSelection(clip.start,clip.end,true);$('startTime').focus()}),button('Copy',()=>{currentDraft().clips.push({...clip,id:id(),name:clip.name+' copy'});remember(true);renderTray()}),button('Remove',()=>{
+    actions.append(button('Hear',()=>{setSelection(clip.start,clip.end,true);preview()},'', 'play'),button('Edit',()=>{state.editing=clip.id;$('clipName').value=clip.name;setSelection(clip.start,clip.end,true);$('startTime').focus()}),button('Copy',()=>{currentDraft().clips.push({...clip,id:id(),name:clip.name+' copy'});remember(true);renderTray()}),button('Remove',()=>{
       const draft=currentDraft(),index=draft.clips.findIndex(c=>c.id===clip.id);draft.clips.splice(index,1);if(state.editing===clip.id)clearEdit();remember(true);renderTray();
       status('Clip removed.');const undo=button('Undo',()=>{draft.clips.splice(index,0,clip);persist();renderTray();status('Clip restored.')},'quiet small');$('status').append(' ',undo);
     }));row.append(actions);return row;
@@ -322,8 +330,8 @@ function renderTray() {
 }
 function length(){return C.clamp($('targetLength').value==='custom'?Number($('customLength').value)||30:Number($('targetLength').value),5,600)}
 function showIdea(idea){
-  state.idea=idea;const top=element('div','idea-top');top.append(element('strong','',C.time(idea.start)+' → '+C.time(idea.end)),element('span','',idea.reason));
-  const actions=element('div','idea-actions');actions.append(button('▷ Listen',()=>{setSelection(idea.start,idea.end,true);preview()}),button('+ Keep',()=>{setSelection(idea.start,idea.end,true);saveClip()}),button('Skip →',()=>nextIdea(idea.reason==='Random pick'),'quiet'));
+  state.idea=idea;const top=element('div','idea-top');top.append(element('strong','',C.time(idea.start)+' to '+C.time(idea.end)),element('span','',idea.reason));
+  const actions=element('div','idea-actions');actions.append(button('Listen',()=>{setSelection(idea.start,idea.end,true);preview()},'', 'play'),button('+ Keep',()=>{setSelection(idea.start,idea.end,true);saveClip()}),button('Skip',()=>nextIdea(idea.reason==='Random pick'),'quiet','right'));
   $('idea').replaceChildren(top,actions);$('idea').hidden=false;setSelection(idea.start,idea.end,true);seekTo(idea.start);
 }
 function nextIdea(random=false){
@@ -352,7 +360,7 @@ function exportName(episode, clip, format, index) {
 }
 function downloadLink(blob, name, label) {
   const url = URL.createObjectURL(blob); exportUrls.push(url);
-  const a = element('a', 'button primary', label); a.href = url; a.download = name;
+  const a = element('a', 'button primary', label); a.href = url; a.download = name; a.prepend(icon('down'));
   return a;
 }
 async function exportClips(clips) {
@@ -382,7 +390,7 @@ async function exportClips(clips) {
       outputs.push({name, blob: result.blob});
       const row = element('div', 'download-result');
       row.append(element('strong', '', clips[i].name || 'Good bit'), element('p', 'muted', C.time(clips[i].start) + ' – ' + C.time(clips[i].end) + ' · ' + (result.blob.size / 1048576).toFixed(2) + ' MB'));
-      const link = downloadLink(result.blob, name, '↓ Save ' + format.toUpperCase()); row.append(link);
+      const link = downloadLink(result.blob, name, 'Save ' + format.toUpperCase()); row.append(link);
       if (navigator.canShare) {
         const file = new File([result.blob], name, {type: result.blob.type});
         if (navigator.canShare({files: [file]})) row.append(button('Share / Save to Files', async () => {
@@ -399,7 +407,7 @@ async function exportClips(clips) {
       for (const output of outputs) files[output.name] = new Uint8Array(await output.blob.arrayBuffer());
       controller.signal.throwIfAborted();
       const zip = new Blob([fflate.zipSync(files, {level: 0})], {type: 'application/zip'});
-      const link = downloadLink(zip, 'yellow-five-' + (episode.number || 'clips') + '-clips.zip', '↓ Save all clips as ZIP');
+      const link = downloadLink(zip, 'yellow-five-' + (episode.number || 'clips') + '-clips.zip', 'Save all clips as ZIP');
       link.classList.add('wide'); $('downloadResults').prepend(link); link.click();
     }
     $('exportMessage').textContent = 'Ready. Your download has started. You can also save or share below.';
@@ -480,8 +488,8 @@ $('restoreDrafts').onchange=async e=>{
 };
 player.addEventListener('loadedmetadata',()=>{if(Number.isFinite(player.duration)&&player.duration>0)state.duration=player.duration;applyDuration();seekTo(state.pendingSeek,Boolean(state.preview));status('Ready to listen and clip.')});
 player.addEventListener('durationchange',()=>{if(Number.isFinite(player.duration)&&player.duration>0){state.duration=player.duration;applyDuration()}});
-player.addEventListener('play',()=>{$('playPause').textContent='Ⅱ';$('playPause').setAttribute('aria-label','Pause');cancelAnimationFrame(state.frame);playbackTick()});
-player.addEventListener('pause',()=>{$('playPause').textContent='▶';$('playPause').setAttribute('aria-label','Play');cancelAnimationFrame(state.frame);remember(true);draw()});
+player.addEventListener('play',()=>{$('playPause').replaceChildren(icon('pause'));$('playPause').setAttribute('aria-label','Pause');cancelAnimationFrame(state.frame);playbackTick()});
+player.addEventListener('pause',()=>{$('playPause').replaceChildren(icon('play'));$('playPause').setAttribute('aria-label','Play');cancelAnimationFrame(state.frame);remember(true);draw()});
 player.addEventListener('ended',()=>{state.preview=null});
 player.addEventListener('timeupdate',()=>{if(state.preview&&player.currentTime>=state.preview.end){if($('loop').checked)seekTo(state.preview.start,true);else{player.pause();state.preview=null}}updateClock();if(Date.now()-lastPositionSave>2000){remember();lastPositionSave=Date.now()}});
 player.addEventListener('error',()=>status('The episode audio couldn’t load. Check your connection and try another episode or refresh.',true));
