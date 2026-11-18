@@ -432,7 +432,7 @@ document.querySelectorAll('[data-skip]').forEach(b=>b.onclick=()=>seekTo(player.
 $('speed').onchange=()=>{player.playbackRate=Number($('speed').value)};
 $('seek').oninput=()=>{seekTo(Number($('seek').value));centerAt(Number($('seek').value))};
 $('pan').oninput=()=>{state.view=Number($('pan').value);waveCaches.delete('detail');draw()};
-$('zoom').onchange=()=>{centerAt(state.view+viewSpan()/2);applyPanLimit()};
+$('zoom').onchange=()=>{centerAt(player.currentTime||state.start);applyPanLimit()};
 $('centerSelection').onclick=centerSelection;$('centerPlayhead').onclick=()=>centerAt(player.currentTime);
 $('detail').addEventListener('pointerdown',e=>{const r=e.currentTarget.getBoundingClientRect();seekTo(state.view+C.clamp((e.clientX-r.left)/r.width,0,1)*viewSpan())});
 bindHandle('start');bindHandle('end');
@@ -475,7 +475,8 @@ player.addEventListener('ended',()=>{state.preview=null});
 player.addEventListener('timeupdate',()=>{if(state.preview&&player.currentTime>=state.preview.end){if($('loop').checked)seekTo(state.preview.start,true);else{player.pause();state.preview=null}}updateClock();if(Date.now()-lastPositionSave>2000){remember();lastPositionSave=Date.now()}});
 player.addEventListener('error',()=>status('The episode audio couldn’t load. Check your connection and try another episode or refresh.',true));
 document.addEventListener('keydown',e=>{
-  if(!state.current||$('studio').hidden||document.querySelector('dialog[open]')||/INPUT|TEXTAREA|SELECT|BUTTON/.test(e.target.tagName)||e.target.isContentEditable||e.ctrlKey||e.metaKey||e.altKey)return;
+  if(!state.current||$('studio').hidden||document.querySelector('dialog[open]')||/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable||e.ctrlKey||e.metaKey||e.altKey)return;
+  if(e.target.tagName==='BUTTON'&&e.key===' ')return;
   const key=e.key.toLowerCase();const actions={' ':togglePlay,arrowleft:()=>seekTo(player.currentTime-(e.shiftKey?30:5)),arrowright:()=>seekTo(player.currentTime+(e.shiftKey?30:5)),i:()=>$('markStart').click(),o:()=>$('markEnd').click(),p:preview,s:saveClip};
   if(actions[key]){e.preventDefault();actions[key]()}
 });
