@@ -18,11 +18,15 @@ jobs:
         bucket: [0, 1, 2, 3]
     concurrency:
       group: clipper-audio-${{ matrix.bucket }}
-      cancel-in-progress: false
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - name: Install FFmpeg
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 update -qq
+            sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 install -y -qq ffmpeg
+          fi
       - name: Prepare audio for direct browser downloads
         run: |
           git config user.name 'github-actions[bot]'
