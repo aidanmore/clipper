@@ -1,0 +1,30 @@
+name: Prepare direct clip downloads
+on:
+  push:
+    branches: [main]
+    paths: ['scripts/prepare_audio.py', '.github/workflows/clipper-audio.yml']
+  schedule:
+    - cron: '32 */4 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  audio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        bucket: [0, 1, 2, 3]
+    concurrency:
+      group: clipper-audio-${{ matrix.bucket }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install FFmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Prepare audio for direct browser downloads
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 -u scripts/prepare_audio.py --bucket ${{ matrix.bucket }}
