@@ -59,7 +59,9 @@ def run():
                     page.route("https://raw.githubusercontent.com/aidanmore/clipper/clipper-audio-*/**", audio)
                     for which, (info, raw) in sources.items():
                         # Native full-file decoding is the timestamp reference.
-                        page.route("**/reference.mp3", lambda route, raw=raw: route.fulfill(body=raw, content_type="audio/mpeg"))
+                        def reference(route):
+                            route.fulfill(body=raw, content_type="audio/mpeg")
+                        page.route("**/reference.mp3", reference)
                         result = page.evaluate("""async ({which}) => {
                             const ctx = new AudioContext({sampleRate:44100});
                             const reference = await ctx.decodeAudioData(await (await fetch('reference.mp3')).arrayBuffer());
