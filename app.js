@@ -3,7 +3,6 @@
 const $ = id => document.getElementById(id);
 const C = ClipCore;
 const REPO = 'aidanmore/clipper';
-const API = 'https://api.github.com/repos/' + REPO;
 const RAW = 'https://raw.githubusercontent.com/' + REPO + '/main/';
 const FEED = 'https://anchor.fm/s/1014cea94/podcast/rss';
 const STORE = 'y5-clipper-v2';
@@ -15,8 +14,8 @@ let storageAvailable = true;
 let saved;
 try { saved = JSON.parse(localStorage.getItem(STORE)) || {}; } catch { saved = {}; }
 if (!saved || typeof saved !== 'object' || Array.isArray(saved)) saved = {};
-saved.episodes ||= {}; saved.jobs ||= []; saved.version = 2;
-let saveTimer, statusTimer, pollTimer, lastCheck = 0, lastPositionSave = 0;
+saved.episodes ||= {}; saved.version = 2;
+let saveTimer, statusTimer, lastPositionSave = 0;
 const waveCaches = new Map();
 
 function element(tag, className, text) {
@@ -345,62 +344,74 @@ async function copyLink(){
   try{await navigator.clipboard.writeText(url.href);status('Episode and clip selection link copied.')}catch{status('Copy this link: '+url.href)}
 }
 function downloadBlob(blob,name){const url=URL.createObjectURL(blob),a=element('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000)}
-async function localExport(clips){
-  if(!state.localBuffer){status('Local export needs decoded audio. Open a file under 40 MB, or use an archive episode for GitHub export.',true);return}
-  if(state.busy)return;state.busy=true;
-  try{
-    for(const clip of clips){
-      const b=state.localBuffer,sr=b.sampleRate,channels=b.numberOfChannels,first=Math.floor(clip.start*sr),last=Math.min(b.length,Math.floor(clip.end*sr)),count=last-first;
-      if(count*channels*2>128*1024*1024)throw new Error('Choose a shorter clip for local export');
-      const bytes=new ArrayBuffer(44+count*channels*2),v=new DataView(bytes),str=(offset,s)=>[...s].forEach((c,i)=>v.setUint8(offset+i,c.charCodeAt(0)));
-      str(0,'RIFF');v.setUint32(4,36+count*channels*2,true);str(8,'WAVE');str(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,channels,true);v.setUint32(24,sr,true);v.setUint32(28,sr*channels*2,true);v.setUint16(32,channels*2,true);v.setUint16(34,16,true);str(36,'data');v.setUint32(40,count*channels*2,true);
-      const data=Array.from({length:channels},(_,c)=>b.getChannelData(c));let offset=44;
-      for(let i=first;i<last;i++)for(let c=0;c<channels;c++){const x=C.clamp(data[c][i],-1,1);v.setInt16(offset,x<0?x*32768:x*32767,true);offset+=2}
-      downloadBlob(new Blob([bytes],{type:'audio/wav'}),clip.name.replace(/[^a-z0-9_-]/gi,'-')+'.wav');
-    }status('WAV export ready. Check your downloads.');
-  }catch(error){status(error.message,true)}finally{state.busy=false}
+let exportController;
+const exportUrls = [];
+function exportName(episode, clip, format, index) {
+  const name = String(clip.name || 'Good bit').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-|-$/g, '').slice(0, 60) || 'clip';
+  return String(index + 1).padStart(2, '0') + '-yellow-five-' + (episode.number || 'audio') + '-' + name + '-' + clip.start.toFixed(2) + '-' + clip.end.toFixed(2) + '.' + format;
 }
-let pendingJob;
-function exportClips(clips){
-  if(!state.current)return;
-  if(clips.length>10||clips.some(c=>c.end-c.start>600)||clips.reduce((n,c)=>n+c.end-c.start,0)>1800){status('Export up to 10 clips, 10 minutes each, 30 minutes total. Export a smaller selection.',true);return}
-  if(state.current.local){localExport(clips);return}
-  const requestId=id(),payload={version:1,request:requestId,episode:state.current.guid,fingerprint:state.current.fingerprint,clips:clips.map(c=>({name:c.name||'Good bit',start:Number(c.start.toFixed(2)),end:Number(c.end.toFixed(2))}))};
-  const title='[clipper export] '+requestId.slice(0,8)+' · '+state.current.title;
-  const body='Requested from the Yellow Five clipper. Submit this issue to render '+clips.length+' clip(s).\n\n```json\n'+JSON.stringify(payload,null,2)+'\n```\n\nReturn to https://aidanmore.github.io/clipper/ and use Check exports.';
-  const url=new URL('https://github.com/'+REPO+'/issues/new');url.searchParams.set('title',title);url.searchParams.set('body',body);
-  pendingJob={request:requestId,title:state.current.title,count:clips.length,createdAt:Date.now(),state:'awaiting',issue:null,assets:[]};
-  $('submitExport').href=url.href;$('exportSummary').textContent=clips.length+' clip'+(clips.length===1?'':'s')+' · '+C.time(clips.reduce((n,c)=>n+c.end-c.start,0))+' total';$('exportDialog').showModal();
+function downloadLink(blob, name, label) {
+  const url = URL.createObjectURL(blob); exportUrls.push(url);
+  const a = element('a', 'button primary', label); a.href = url; a.download = name;
+  return a;
 }
-function renderJobs(){
-  $('exportHistory').hidden=!saved.jobs.length;
-  $('exportJobs').replaceChildren(...saved.jobs.slice().reverse().map(job=>{
-    const row=element('div','export-job');row.append(element('strong','',job.title+' · '+job.count+' clip'+(job.count===1?'':'s')));
-    row.append(element('p','',job.state==='ready'?'Ready to download':job.state==='awaiting'?'Waiting for your GitHub submission':job.state==='failed'?'Export needs attention — open the request for details':'Submitted · waiting for GitHub to finish rendering'));
-    if(job.issue){const a=element('a','', 'Request #'+job.issue+' ↗');a.href='https://github.com/'+REPO+'/issues/'+job.issue;a.target='_blank';a.rel='noopener';row.append(a)}
-    for(const asset of job.assets||[]){const a=element('a','',asset.name);a.href=asset.url;a.target='_blank';a.rel='noopener';row.append(a)}
-    if(job.state==='awaiting')row.append(button('Dismiss',()=>{saved.jobs=saved.jobs.filter(j=>j.request!==job.request);persist();renderJobs()},'quiet small'));
-    return row;
-  }));
-}
-async function checkExports(force=false){
-  clearTimeout(pollTimer);
-  const jobs=saved.jobs.filter(j=>j.state!=='ready'&&j.state!=='failed');
-  if(!jobs.length||document.hidden)return;
-  if(Date.now()-lastCheck<30000){if(force)status('Checked recently. Try again in a few seconds.');schedulePoll();return}
-  lastCheck=Date.now();$('checkExports').disabled=true;
-  try{
-    const issues=await request(API+'/issues?creator=aidanmore&state=all&per_page=50');
-    for(const job of jobs){
-      const issue=issues.find(i=>i.title.startsWith('[clipper export] '+job.request.slice(0,8)));
-      if(!issue)continue;job.issue=issue.number;job.state='rendering';
-      try{const release=await request(API+'/releases/tags/clipper-export-'+issue.number);job.assets=release.assets.filter(a=>/\.(mp3|zip)$/.test(a.name)&&https(a.browser_download_url)).map(a=>({name:a.name,url:a.browser_download_url}));if(job.assets.length)job.state='ready'}catch(error){if(error.code!==404)throw error;const comments=await request(API+'/issues/'+issue.number+'/comments');if(comments.some(c=>c.user?.type==='Bot'&&c.body.startsWith('Clip export failed:')))job.state='failed'}
+async function exportClips(clips) {
+  if (!state.current || state.busy || !clips.length) return;
+  if (clips.length > 10 || clips.some(c => !Number.isFinite(c.start) || !Number.isFinite(c.end) || c.start < 0 || c.end - c.start < .5 || c.end - c.start > 600 || c.end > state.duration + .05) || clips.reduce((n,c) => n + c.end - c.start, 0) > 1800) {
+    status('Export up to 10 clips, 10 minutes each, 30 minutes total. Export a smaller selection.', true); return;
+  }
+  if (state.current.local && !state.localBuffer) { status('This local file is too large to decode. Choose its live archive episode to download clips directly.', true); return; }
+  const episode = {...state.current}, localBuffer = state.localBuffer, format = $('exportFormat').value;
+  clips = clips.map(c => ({...c}));
+  state.busy = true; exportController = new AbortController();
+  const controller = exportController;
+  for (const url of exportUrls.splice(0)) URL.revokeObjectURL(url);
+  $('downloadResults').replaceChildren(); $('downloadProgress').hidden = false; $('downloadProgress').value = 0;
+  $('exportSummary').textContent = clips.length + ' clip' + (clips.length === 1 ? '' : 's') + ' · ' + C.time(clips.reduce((n,c) => n + c.end - c.start, 0)) + ' · ' + format.toUpperCase();
+  $('exportMessage').textContent = 'Loading selected audio…'; $('exportMessage').dataset.error = false;
+  $('cancelExport').textContent = 'Cancel'; $('exportDialog').showModal();
+  const outputs = [];
+  try {
+    for (let i = 0; i < clips.length; i++) {
+      const result = await DirectExport.clip(episode, clips[i], {format, signal: controller.signal, localBuffer,
+        progress: (fraction, text) => {
+          $('downloadProgress').value = (i + fraction) / clips.length;
+          $('exportMessage').textContent = (clips.length > 1 ? 'Clip ' + (i + 1) + ' of ' + clips.length + ' · ' : '') + text;
+        }});
+      const name = exportName(episode, clips[i], format, i);
+      outputs.push({name, blob: result.blob});
+      const row = element('div', 'download-result');
+      row.append(element('strong', '', clips[i].name || 'Good bit'), element('p', 'muted', C.time(clips[i].start) + ' – ' + C.time(clips[i].end) + ' · ' + (result.blob.size / 1048576).toFixed(2) + ' MB'));
+      const link = downloadLink(result.blob, name, '↓ Save ' + format.toUpperCase()); row.append(link);
+      if (navigator.canShare) {
+        const file = new File([result.blob], name, {type: result.blob.type});
+        if (navigator.canShare({files: [file]})) row.append(button('Share / Save to Files', async () => {
+          try { await navigator.share({files: [file]}); } catch (error) { if (error.name !== 'AbortError') status('Use Save ' + format.toUpperCase() + ' to download the clip.', true); }
+        }, 'quiet'));
+      }
+      const audio = element('audio'); audio.controls = true; audio.preload = 'metadata'; audio.src = link.href; audio.setAttribute('aria-label', 'Preview exported ' + (clips[i].name || 'clip')); row.append(audio);
+      $('downloadResults').append(row);
+      if (clips.length === 1) link.click();
     }
-    persist();renderJobs();if(force)status('Export status updated.');
-  }catch(error){if(force)status(error.code===403||error.code===429?'GitHub’s request limit was reached. Open your export request to check progress, or try later.':'Couldn’t check GitHub. You can also download from your export request.',true)}
-  finally{$('checkExports').disabled=false;schedulePoll()}
+    if (outputs.length > 1) {
+      $('exportMessage').textContent = 'Bundling your clips…';
+      const files = {};
+      for (const output of outputs) files[output.name] = new Uint8Array(await output.blob.arrayBuffer());
+      controller.signal.throwIfAborted();
+      const zip = new Blob([fflate.zipSync(files, {level: 0})], {type: 'application/zip'});
+      const link = downloadLink(zip, 'yellow-five-' + (episode.number || 'clips') + '-clips.zip', '↓ Save all clips as ZIP');
+      link.classList.add('wide'); $('downloadResults').prepend(link); link.click();
+    }
+    $('exportMessage').textContent = 'Ready. Your download has started. You can also save or share below.';
+    status('Clips ready — saved directly from the clipper.');
+  } catch (error) {
+    $('exportMessage').textContent = error.name === 'AbortError' ? 'Export cancelled. Your saved clips are still here.' : error.message;
+    $('exportMessage').dataset.error = error.name !== 'AbortError';
+    if (error.name !== 'AbortError') status(error.message, true);
+  } finally {
+    state.busy = false; exportController = null; $('downloadProgress').hidden = true; $('cancelExport').textContent = 'Done';
+  }
 }
-function schedulePoll(){if(saved.jobs.some(j=>!['ready','failed'].includes(j.state)&&Date.now()-j.createdAt<30*60*1000)&&!document.hidden)pollTimer=setTimeout(()=>checkExports(),90000)}
 
 async function openLocal(file){
   if(!file)return;
@@ -409,7 +420,7 @@ async function openLocal(file){
   const guid='local-'+await shortHash(file.name+'/'+file.size+'/'+file.lastModified);
   openEpisode({guid,title:file.name,number:'',date:'',duration:0,audio:state.objectUrl,cover:'',local:true});
   const revision=state.revision;
-  if(file.size>40*1024*1024){$('discoveryStatus').textContent='Large local file: listening and drafts are ready. Open the matching archive episode for export and prepared waveforms.';$('waveStatus').textContent='Seek timeline';return}
+  if(file.size>40*1024*1024){$('discoveryStatus').textContent='Large local file: listening and drafts are ready. Open the matching archive episode to download clips directly.';$('waveStatus').textContent='Seek timeline';return}
   let ctx;
   try{
     const AudioCtx=window.AudioContext||window.webkitAudioContext;ctx=new AudioCtx();
@@ -418,7 +429,7 @@ async function openLocal(file){
     const data=buffer.getChannelData(0),peakStep=.01,energyStep=.25,peaks=[],energy=[];
     for(let i=0;i<data.length;i+=Math.max(1,Math.floor(buffer.sampleRate*peakStep))){let max=0;const end=Math.min(data.length,i+Math.floor(buffer.sampleRate*peakStep));for(let j=i;j<end;j++)max=Math.max(max,Math.abs(data[j]));peaks.push(Math.round(max*255))}
     for(let i=0;i<data.length;i+=Math.floor(buffer.sampleRate*energyStep)){let sum=0;const end=Math.min(data.length,i+Math.floor(buffer.sampleRate*energyStep));for(let j=i;j<end;j++)sum+=data[j]*data[j];energy.push(Math.round(Math.sqrt(sum/(end-i))*65535))}
-    state.analysis={duration:buffer.duration,peakStep,peaks,energyStep,energy};applyDuration();waveCaches.clear();draw();$('waveStatus').textContent='Waveform ready';$('discoveryStatus').textContent='Local audio analysis ready. Local clips export as WAV.';$('nextIdea').disabled=false;
+    state.analysis={duration:buffer.duration,peakStep,peaks,energyStep,energy};applyDuration();waveCaches.clear();draw();$('waveStatus').textContent='Waveform ready';$('discoveryStatus').textContent='Local audio analysis ready. Clips download directly as MP3 or WAV.';$('nextIdea').disabled=false;
   }catch{$('waveStatus').textContent='Seek timeline';$('discoveryStatus').textContent='This file could not be decoded for analysis or export. Listening and drafts still work.'}
   finally{if(ctx)await ctx.close().catch(()=>{})}
 }
@@ -456,8 +467,8 @@ $('clipName').oninput=()=>remember();$('nextIdea').onclick=()=>nextIdea();$('ran
 $('targetLength').onchange=()=>{$('customLength').hidden=$('targetLength').value!=='custom';state.idea=null;$('idea').hidden=true};
 $('exportAll').onclick=()=>exportClips(currentDraft()?.clips||[]);
 $('exportSelection').onclick=()=>{if(commitTimeFields())exportClips([{start:state.start,end:state.end,name:$('clipName').value||'Good bit'}])};
-$('submitExport').onclick=()=>{if(pendingJob){saved.jobs.push(pendingJob);saved.jobs=saved.jobs.slice(-30);pendingJob=null;persist();renderJobs();schedulePoll()}$('exportDialog').close()};
-$('checkExports').onclick=()=>checkExports(true);
+$('cancelExport').onclick=()=>{exportController?.abort();$('exportDialog').close()};
+$('exportDialog').addEventListener('close',()=>exportController?.abort());
 $('helpButton').onclick=()=>$('helpDialog').showModal();
 $('fileInput').onchange=e=>{openLocal(e.target.files[0]);e.target.value=''};
 $('backupDrafts').onclick=()=>{remember(true);downloadBlob(new Blob([JSON.stringify(saved,null,2)],{type:'application/json'}),'yellow-five-clipper-drafts.json')};
@@ -480,7 +491,7 @@ document.addEventListener('keydown',e=>{
   const key=e.key.toLowerCase();const actions={' ':togglePlay,arrowleft:()=>seekTo(player.currentTime-(e.shiftKey?30:5)),arrowright:()=>seekTo(player.currentTime+(e.shiftKey?30:5)),i:()=>$('markStart').click(),o:()=>$('markEnd').click(),p:preview,s:saveClip};
   if(actions[key]){e.preventDefault();actions[key]()}
 });
-document.addEventListener('visibilitychange',()=>{remember(true);if(document.hidden){clearTimeout(pollTimer)}else{schedulePoll();draw()}});
+document.addEventListener('visibilitychange',()=>{remember(true);if(!document.hidden)draw()});
 window.addEventListener('pagehide',()=>remember(true));window.addEventListener('resize',()=>{waveCaches.clear();draw()});
 if('mediaSession'in navigator){try{navigator.mediaSession.setActionHandler('play',play);navigator.mediaSession.setActionHandler('pause',()=>player.pause());navigator.mediaSession.setActionHandler('seekbackward',()=>seekTo(player.currentTime-10));navigator.mediaSession.setActionHandler('seekforward',()=>seekTo(player.currentTime+10))}catch{}}
-(async()=>{renderJobs();await archive();const q=new URLSearchParams(location.search),episode=state.episodes.find(e=>e.guid===q.get('episode'));if(episode){const start=C.parseTime(q.get('start')||''),end=C.parseTime(q.get('end')||'');openEpisode(episode,Number.isFinite(start)&&Number.isFinite(end)?{start,end}:null)}schedulePoll()})();
+(async()=>{await archive();const q=new URLSearchParams(location.search),episode=state.episodes.find(e=>e.guid===q.get('episode'));if(episode){const start=C.parseTime(q.get('start')||''),end=C.parseTime(q.get('end')||'');openEpisode(episode,Number.isFinite(start)&&Number.isFinite(end)?{start,end}:null)}})();

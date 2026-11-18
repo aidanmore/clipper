@@ -1,48 +1,25 @@
 # Yellow Five clipper
 
-A GitHub Pages cutting room for the live Yellow Five archive. No local server or running computer is needed.
+A static, mobile-friendly cutting room at https://aidanmore.github.io/clipper/.
 
-## Use it
+Choose an episode from the live archive, listen, and collect the good bits. **Last 30s** captures the moment you just heard. Drag the edges, mark start/end while listening, or enter fractional timestamps. Saved clips, listening position, reviewed suggestions, backups, and share links continue to work.
 
-Open **https://aidanmore.github.io/clipper/**. Search by title or episode number, choose an episode, and start listening. **Last 30s** selects the moment you just heard. Mark start/end while listening, drag the zoomed waveform handles, nudge by 0.1 or 1 second, or enter a timestamp such as `12:34.50`.
+## Download clips
 
-Preview the selection, optionally loop it or hear two seconds of context, then save it to the clip tray. Saved clips can be edited, duplicated, removed with undo, and exported together. Clip drafts, reviewed suggestions, and listening position save in this browser. **Backup / Restore** moves saved clips between devices. **Copy link** shares one episode and exact selection.
+Choose **MP3** or **WAV**, then **Download current selection** or **Download saved clips**. The browser builds and downloads your audio directly. Batches include individual files and a ZIP. The download panel includes playback and Save buttons; supported phones also offer the native Share / Save to Files sheet. Keep the page open while encoding. Cancel is safe; drafts remain saved.
 
-Desktop shortcuts (outside controls): Space play/pause; arrows seek 5 seconds (Shift: 30); I/O mark start/end; P preview; S save. The waveform handles also support arrows (0.1 seconds; Shift: 1 second).
+MP3 downloads are 192 kbps and retain stereo sources. WAV downloads contain the decoded source audio without another lossy encoding pass. Up to ten clips per batch, ten minutes each and thirty minutes total. There is no login, issue submission, export job, or export polling.
 
-## Export from your phone
+## How direct downloads work
 
-1. Choose **Export current selection** or **Export saved clips**.
-2. Continue to GitHub, sign in as **aidanmore**, and submit the prefilled issue. Preserve its JSON block and title prefix.
-3. Return to the clipper and tap **Check exports**. Downloads appear when the GitHub Actions job finishes. The issue also gets a direct download link.
+The podcast host permits playback but does not send CORS headers, so browser capture alone cannot access its audio. `scripts/prepare_audio.py` automatically mirrors the original, unchanged MP3 bytes in 4 MiB objects on `clipper-audio-0` through `clipper-audio-3`. These branches are separate from the small Pages site. Each episode has a source fingerprint and a sparse, frame-aligned seek table. A scheduled workflow handles new episodes and retries failed preparation; the initial archive backfill runs in four independent jobs. A missing episode shows a preparation message and can be retried directly, with no user submission.
 
-Export produces variable-quality MP3s, preserving source channels. Multiple clips also get a ZIP. Up to 10 clips per request, 10 minutes per clip, 30 minutes total. Requests and release downloads are public. Only requests authored by the repository owner are processed. Keep the page open to see automatic checks every 90 seconds; requests can also be checked later or opened on GitHub. Release downloads remain available until removed from the repository.
+`direct-export.js` fetches only the objects touching the selection. It decodes twenty-second windows with MP3 preroll, then sends the selected samples to `encode-worker.js`. Encoding runs off the main thread. At most three compressed source objects stay cached. Exports and filenames remain on the device; they are not uploaded. Local files under 40 MB can also be decoded and exported directly.
 
-The feed's audio host permits streaming but currently does not grant browser CORS access for audio processing. Repository-hosted Actions run FFmpeg so the phone can stream, edit, and request precise clips without downloading and decoding the entire episode. No credentials are embedded in the page.
+Waveforms and activity-based suggestions use the existing analysis workflow. They are independent of download preparation and are not semantic joke detection. Y5YT and the thumbnail tool remain separate.
 
-## Waveforms and discovery
+## Verification
 
-The page uses the live RSS feed, falling back to a generated catalog if the feed is unavailable. **Prepare clipper archive** runs every four hours and can be run manually from Actions. It refreshes the catalog and prepares four missing or changed episodes per run, newest first. Full audio is temporary on the runner; only compact amplitude and energy data is committed to `data/`. The page reads newly generated data from the repository, without waiting for a Pages rebuild.
+`node --test tests/core.test.cjs` and `python -m unittest discover -s tests -p 'test_*.py'` check selections, analysis, and audio helpers. `tests/browser_export.py` runs the actual decoder/worker pipeline in Chromium and WebKit. It compares stereo WAV samples with native source decoding, checks fractional boundaries and cuts crossing source objects and twenty-second processing windows, verifies MP3 duration and stereo, and saves actual browser downloads. Run it with Playwright's Chromium and WebKit browsers installed. The verification workflow installs these dependencies.
 
-Episodes work before their waveform is ready. Activity-based suggestions become available as analysis finishes. They rank audio energy, changes, and speech activity, settle boundaries near quiet sections, avoid overlap, and skip reviewed spots. They are listening leads, not AI judgments of humor. **Surprise me** is explicitly random. No full-episode speech model runs on the phone. The current feed does not publish transcripts.
-
-## Your own audio
-
-The archive's **Open your own audio** option plays local files. Files under 40 MB can be decoded for waveforms, suggestions, and stereo WAV export. Larger files remain playable and support saved selections; use the matching live archive episode for MP3 export. Local files stay on the device. Local-file links cannot reopen audio on another device; backups preserve clip timestamps.
-
-## Development and checks
-
-The site is buildless HTML/CSS/JavaScript. The runner scripts use Python's standard library, FFmpeg, and FFprobe. Workflows explicitly install FFmpeg. Run:
-
-```sh
-node --check app.js
-node --test tests/core.test.cjs
-python3 -m unittest discover -s tests -p 'test_*.py'
-python3 scripts/prepare_archive.py --limit 4
-```
-
-`scripts/export_request.py` validates request limits, resolves the selected GUID from the fixed feed, verifies its source fingerprint, re-encodes accurate selections, verifies output durations, uploads MP3/ZIP assets to an unpublished draft release, then publishes it and closes the request. Request text is never executed as shell code. It uses the runner's short-lived `GITHUB_TOKEN`, scoped to contents and issues for this repository.
-
-## Related tools
-
-[Y5YT](https://aidanmore.github.io/clipper/y5yt/) prepares full episodes and upload metadata. Its existing [Windows FFmpeg launcher](y5yt/README.md) and [thumbnail editor](https://aidanmore.github.io/clipper/y5yt/thumbnail/) remain separate tools.
+Vendored browser dependencies: lamejs 1.2.1 (LGPL-3.0) and fflate 0.8.2 (MIT); their licenses are in `vendor/`.
