@@ -22,4 +22,6 @@ Waveforms and activity-based suggestions use the existing analysis workflow. The
 
 `node --test tests/core.test.cjs` and `python -m unittest discover -s tests -p 'test_*.py'` check selections, analysis, and audio helpers. `tests/browser_export.py` runs the actual decoder/worker pipeline in Chromium and WebKit. It compares stereo WAV samples with native source decoding, checks fractional boundaries and cuts crossing source objects and twenty-second processing windows, verifies MP3 duration and stereo, and saves actual browser downloads. Run it with Playwright's Chromium and WebKit browsers installed. The verification workflow installs these dependencies.
 
-Vendored browser dependencies: lamejs 1.2.1 (LGPL-3.0) and fflate 0.8.2 (MIT); their licenses are in `vendor/`.
+Vendored browser dependencies: [lamejs 1.2.1](https://github.com/zhuker/lamejs), a JavaScript port of [LAME](https://lame.sourceforge.net/) (LGPL-3.0), and [fflate 0.8.2](https://github.com/101arrowz/fflate) (MIT); their licenses are in `vendor/`.
+
+For a lightweight source checkout, use `git clone --single-branch --depth 1 https://github.com/aidanmore/clipper.git`. The audio branches intentionally hold the larger source archive.

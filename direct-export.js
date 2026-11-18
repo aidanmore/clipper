@@ -43,10 +43,12 @@ window.DirectExport = (() => {
       if (info.seek[i][0] <= start - 1) first = i;
       if (info.seek[i][0] > end + .1) { last = i; break; }
     }
-    return {time: first === 0 ? 0 : info.seek[first][0], from: first === 0 ? 0 : info.seek[first][1],
+    return {time: first === 0 ? 0 : info.seek[first][0], firstTime: info.seek[first][0],
+      endTime: last < info.seek.length ? info.seek[last][0] : info.duration,
+      from: first === 0 ? 0 : info.seek[first][1],
       to: last < info.seek.length ? info.seek[last][1] : info.size};
   }
-  async function decode(episode, info, start, end, context, signal) {
+  async function decode(episode, info, start, end, context, signal, timestampShift = 0) {
     const section = range(info, start, end);
     const first = Math.floor(section.from / info.chunkSize), last = Math.floor((section.to - 1) / info.chunkSize);
     const data = new Uint8Array(section.to - section.from);
@@ -59,7 +61,8 @@ window.DirectExport = (() => {
     }
     signal.throwIfAborted();
     const buffer = await context.decodeAudioData(data.buffer);
-    return {buffer, time: section.time};
+    return {buffer, time: section.time + (section.from === 0 ? 0 : timestampShift),
+      rawSamples: Math.round((section.endTime - section.firstTime) * context.sampleRate)};
   }
   function encodeWorker(signal) {
     const worker = new Worker(new URL('encode-worker.js?v=3', scriptRoot));
@@ -89,6 +92,14 @@ window.DirectExport = (() => {
     const context = new AudioCtx({sampleRate});
     const worker = encodeWorker(signal);
     try {
+      // Some browser decoders honor the Xing/LAME leading trim; others retain it.
+      // Measure the native decoder rather than guessing from a browser name.
+      let timestampShift = 0;
+      if (info && info.seek[0][0] < -.00001) {
+        const head = await decode(episode, info, 0, .1, context, signal);
+        const delay = -info.seek[0][0], removed = head.rawSamples - head.buffer.length;
+        if (Math.abs(removed) < Math.abs(removed - delay * context.sampleRate)) timestampShift = delay;
+      }
       await worker.send({type: 'start', sampleRate: context.sampleRate, channels: Math.min(2, localBuffer?.numberOfChannels || info.channels), format});
       const firstSample = Math.round(selection.start * context.sampleRate), lastSample = Math.round(selection.end * context.sampleRate);
       const step = context.sampleRate * 20;
@@ -96,7 +107,7 @@ window.DirectExport = (() => {
         signal.throwIfAborted();
         const until = Math.min(at + step, lastSample), start = at / context.sampleRate, end = until / context.sampleRate;
         progress((at - firstSample) / (lastSample - firstSample), 'Loading selected audio…');
-        const section = localBuffer ? {buffer: localBuffer, time: 0} : await decode(episode, info, start, end, context, signal);
+        const section = localBuffer ? {buffer: localBuffer, time: 0} : await decode(episode, info, start, end, context, signal, timestampShift);
         const offset = Math.round((start - section.time) * context.sampleRate), count = until - at;
         if (offset < 0 || offset + count > section.buffer.length + 2) throw new Error('Couldn’t read the complete selection. Try moving the end slightly earlier.');
         const pcm = Array.from({length: Math.min(2, section.buffer.numberOfChannels)}, (_, channel) => {
