@@ -11,7 +11,13 @@ def main():
     parser.add_argument("--limit", type=int, default=4)
     args = parser.parse_args()
     episodes = load_feed()
-    write_json(ROOT / "data/catalog.json", {"version": 1, "updatedAt": utc_now(), "episodes": episodes})
+    catalog = ROOT / "data/catalog.json"
+    try:
+        previous = json.loads(catalog.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        previous = {}
+    if previous.get("episodes") != episodes:
+        write_json(catalog, {"version": 1, "updatedAt": utc_now(), "episodes": episodes})
     completed = 0
     errors = []
     for episode in episodes:

@@ -1,89 +1,38 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
-    <title>clipper</title>
-     <link rel="icon" href="pcrp.ico" type="image/x-icon">
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body>
-    <header class="topbar">
-      <h1>clipper</h1>
-      <p>drop an episode. scan fast. clip fast. <a href="y5yt/" style="color: inherit;">y5yt ↗</a> · <a href="y5yt/thumbnail/" style="color: inherit;">thumbnails ↗</a></p>
-    </header>
-
-    <main class="container">
-      <section class="card upload-card">
-        <h2>1) add episode</h2>
-        <div class="dropzone" id="dropzone">
-          <input
-            id="fileInput"
-            class="file-input-overlay"
-            type="file"
-            accept=".mp3,.wav,.m4a,.aac,.ogg,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/ogg"
-          />
-          <div>
-            <strong>tap or drop audio</strong>
-          </div>
-        </div>
-        <div id="episodeMeta" class="meta"></div>
-        <div id="statusMsg" class="status" role="status" aria-live="polite"></div>
-      </section>
-
-      <section class="card" id="workspace" hidden>
-        <h2>2) scan + clip</h2>
-        <audio id="player" controls preload="metadata"></audio>
-
-        <div class="controls-row">
-          <button data-skip="-30">back 30s</button>
-          <button data-skip="-10">back 10s</button>
-          <button id="playPause">play / pause</button>
-          <button data-skip="10">fwd 10s</button>
-          <button data-skip="30">fwd 30s</button>
-        </div>
-
-        <div class="controls-row">
-          <button data-speed="1">1x</button>
-          <button data-speed="1.25">1.25x</button>
-          <button data-speed="1.5">1.5x</button>
-          <button data-speed="1.75">1.75x</button>
-          <button data-speed="2">2x</button>
-        </div>
-
-        <canvas id="waveform" width="1200" height="180" aria-label="episode waveform"></canvas>
-
-        <div class="range-grid">
-          <label>
-            start
-            <input id="startRange" type="range" min="0" value="0" step="0.1" />
-          </label>
-          <label>
-            end
-            <input id="endRange" type="range" min="0" value="0" step="0.1" />
-          </label>
-        </div>
-
-        <div class="selection-row">
-          <div id="selectionInfo">no clip selected yet.</div>
-          <button id="setStartNow">set start = now</button>
-          <button id="setEndNow">set end = now</button>
-          <button id="previewClip">preview clip</button>
-          <button id="saveClip" class="primary">export clip</button>
-        </div>
-      </section>
-
-      <section class="card" id="aiPanel" hidden>
-        <h2>3) random clip ideas</h2>
-        <p class="hint">tap repeatedly to get different timestamps fast.</p>
-        <div class="controls-row">
-          <button id="suggestOne" class="primary">random 1</button>
-          <button id="suggestFive">random 5</button>
-        </div>
-        <div id="suggestions" class="suggestions"></div>
-      </section>
-    </main>
-
-    <script src="app.js"></script>
-  </body>
-</html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#111210"><meta name="description" content="Find your favorite Yellow Five moments. Listen, collect, and cut clips from the live archive."><title>clipper · yellow five</title><link rel="icon" href="pcrp.ico"><link rel="stylesheet" href="styles.css?v=2">
+</head><body>
+<header class="topbar"><a class="wordmark" href="./" aria-label="Clipper home">clipper<span class="brand-dot">✳</span></a><span class="top-label">yellow five / cutting room</span><nav><a href="y5yt/">y5yt ↗</a><a href="y5yt/thumbnail/">thumbnails ↗</a><button class="icon-button" id="helpButton" aria-label="Help and shortcuts">?</button></nav></header>
+<main>
+<section id="library" class="library">
+  <div class="section-head"><div><p class="eyebrow">THE ARCHIVE</p><h1>Find a good bit.</h1></div><button id="refreshArchive" class="quiet">Refresh ↻</button></div>
+  <div class="library-tools"><input id="search" type="search" placeholder="Search title or episode number…" aria-label="Search episodes" autocomplete="off"><select id="sort" aria-label="Sort episodes"><option value="new">Newest first</option><option value="old">Oldest first</option></select></div>
+  <div class="library-meta"><span id="archiveStatus" role="status">Connecting to Yellow Five…</span><label class="file-label">Open your own audio<input id="fileInput" type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.aac"></label></div>
+  <button id="resume" class="resume" hidden></button><div id="episodes" class="episode-grid" aria-label="Yellow Five episodes"></div><button id="moreEpisodes" class="wide quiet" hidden>Show more episodes ↓</button>
+</section>
+<section id="studio" hidden>
+  <div class="studio-heading"><button id="backToArchive" class="quiet">← All episodes</button><span class="eyebrow" id="sourceMode">LIVE SOURCE</span></div>
+  <div class="episode-heading"><img id="episodeCover" alt="" width="72" height="72"><div><p class="eyebrow" id="episodeDate"></p><h1 id="episodeTitle"></h1><p class="muted" id="episodeInfo"></p></div></div>
+  <div class="studio-grid"><div class="edit-column">
+    <section class="panel editor" aria-label="Clip editor">
+      <div class="panel-label"><span>01 / FIND YOUR MOMENT</span><span id="waveStatus">Loading timeline…</span></div>
+      <div class="overview-wrap"><canvas id="overview" aria-hidden="true"></canvas><input id="seek" type="range" min="0" max="1" step=".01" value="0" aria-label="Seek through episode"></div><div class="timeline-times"><span>0:00</span><span id="durationLabel">—</span></div>
+      <div class="zoom-toolbar"><span class="eyebrow">FINE CUT</span><div><button id="centerSelection" class="quiet small">Selection</button><button id="centerPlayhead" class="quiet small">Playhead</button><select id="zoom" aria-label="Timeline zoom"><option value="120">2 min</option><option value="60">1 min</option><option value="30" selected>30 sec</option><option value="10">10 sec</option><option value="3">3 sec</option></select></div></div>
+      <div class="detail-wrap"><canvas id="detail" aria-hidden="true"></canvas><button class="handle start-handle" id="startHandle" aria-label="Drag clip start">I</button><button class="handle end-handle" id="endHandle" aria-label="Drag clip end">O</button></div><div class="timeline-times"><span id="viewStart">0:00</span><span id="viewEnd">0:30</span></div><input id="pan" class="pan" type="range" value="0" min="0" max="1" step=".1" aria-label="Move zoomed timeline">
+      <div class="selection-header"><span class="eyebrow">YOUR SELECTION</span><strong id="clipLength">30.0s</strong></div>
+      <div class="bounds"><div><div class="field-head"><label for="startTime">START</label><button id="markStart" class="quiet small">Mark now <kbd>I</kbd></button></div><input id="startTime" value="0:00.00" inputmode="decimal" aria-label="Clip start timestamp"><div class="nudges" data-edge="start"><button data-nudge="-1">−1s</button><button data-nudge="-.1">−.1</button><button data-nudge=".1">+.1</button><button data-nudge="1">+1s</button></div></div><div><div class="field-head"><label for="endTime">END</label><button id="markEnd" class="quiet small">Mark now <kbd>O</kbd></button></div><input id="endTime" value="0:30.00" inputmode="decimal" aria-label="Clip end timestamp"><div class="nudges" data-edge="end"><button data-nudge="-1">−1s</button><button data-nudge="-.1">−.1</button><button data-nudge=".1">+.1</button><button data-nudge="1">+1s</button></div></div></div>
+      <div class="preview-row"><button id="preview">▷ Preview clip</button><label class="check"><input id="loop" type="checkbox">Loop</label><label class="check"><input id="context" type="checkbox">+2s context</label><button id="copyLink" class="quiet">Copy link ↗</button></div>
+      <div class="save-row"><input id="clipName" maxlength="80" placeholder="Give this bit a name…" aria-label="Clip name"><button id="saveClip" class="primary">+ Save clip</button></div><button id="cancelEdit" class="quiet small" hidden>Cancel editing saved clip</button>
+    </section>
+    <section class="panel discovery" aria-labelledby="discoveryTitle"><div class="panel-label"><span>02 / EXPLORE</span><span>FOLLOW YOUR EAR</span></div><div class="discovery-heading"><h2 id="discoveryTitle">Looking for a starting point?</h2><label class="length-label">Length<select id="targetLength"><option value="15">15 sec</option><option value="30" selected>30 sec</option><option value="60">60 sec</option><option value="custom">Custom</option></select><input id="customLength" type="number" min="5" max="600" value="45" aria-label="Custom suggestion length in seconds" hidden></label></div><p class="muted" id="discoveryStatus">Loading prepared audio analysis…</p><div class="discovery-actions"><button id="nextIdea">Next suggestion →</button><button id="randomIdea" class="quiet">✳ Surprise me</button></div><div id="idea" class="idea" hidden></div></section>
+  </div><aside class="panel tray" aria-labelledby="trayTitle"><div class="panel-label"><span>03 / THE KEEPERS</span><span id="savedCount">0 CLIPS</span></div><h2 id="trayTitle">Clip tray</h2><p class="muted tray-hint">Collect the good ones. Come back for the cut.</p><div id="clipTray"></div><button id="exportAll" class="primary wide" disabled>Export saved clips ↗</button><button id="exportSelection" class="quiet wide">Export current selection</button><div class="tray-footer"><span id="draftStatus">Drafts save on this device</span><button id="backupDrafts" class="quiet small">Backup ↓</button><label class="file-label small">Restore ↑<input id="restoreDrafts" type="file" accept=".json,application/json"></label></div></aside></div>
+</section>
+<section id="exportHistory" class="panel export-history" hidden><div class="section-head"><div><p class="eyebrow">TAKE IT WITH YOU</p><h2>Your exports</h2></div><button id="checkExports" class="quiet">Check exports ↻</button></div><div id="exportJobs"></div></section><p id="status" class="status" role="status" aria-live="polite"></p>
+</main>
+<footer class="site-footer"><span>yellow five / clipper</span><span>good bits, clean cuts.</span></footer>
+<div class="transport" id="transport" hidden><div class="transport-inner"><div class="clock"><strong id="currentTime">0:00</strong><span id="transportDuration"> / —</span></div><div class="playback"><button data-skip="-10" aria-label="Back 10 seconds">↶<span>10</span></button><button id="playPause" class="play" aria-label="Play">▶</button><button data-skip="10" aria-label="Forward 10 seconds">↷<span>10</span></button></div><select id="speed" aria-label="Playback speed"><option value=".75">.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option></select><button id="capture" class="capture">✂ Last 30s</button></div></div>
+<audio id="player" preload="metadata" playsinline></audio>
+<dialog id="exportDialog"><form method="dialog"><button class="dialog-close quiet" aria-label="Close">×</button></form><p class="eyebrow">READY TO GO</p><h2>Take your clips.</h2><p id="exportSummary"></p><p class="muted">Continue to GitHub and submit the prefilled request. Rendering runs there; you can come back here and keep listening.</p><p class="hint">Sign in as aidanmore. Requests and finished clips are public. Up to 10 clips, 10 minutes each, 30 minutes total.</p><a id="submitExport" class="button primary wide" target="_blank" rel="noopener">Continue to GitHub ↗</a><p class="hint">After submitting, return here and use <strong>Check exports</strong>. A short wait is normal.</p></dialog>
+<dialog id="helpDialog"><form method="dialog"><button class="dialog-close quiet" aria-label="Close">×</button></form><p class="eyebrow">A QUICK TOUR</p><h2>Listen. Mark. Keep.</h2><p>Choose an episode, then tap <strong>Last 30s</strong> after a good moment. Drag the selection edges or enter timestamps to refine the cut. Save as many drafts as you like.</p><p>Suggestions use audio activity and energy changes. They help you explore; your ear picks the keepers. Waveforms prepare in batches, newest episodes first.</p><p>On desktop: <kbd>Space</kbd> play/pause · <kbd>←</kbd> <kbd>→</kbd> seek 5s · <kbd>I</kbd> start · <kbd>O</kbd> end · <kbd>P</kbd> preview · <kbd>S</kbd> save.</p><p class="muted">Drafts stay in this browser. Use Backup / Restore to move your collection. Shared links carry one episode and selection.</p></dialog>
+<script src="core.js?v=2"></script><script src="app.js?v=2"></script>
+</body></html>
